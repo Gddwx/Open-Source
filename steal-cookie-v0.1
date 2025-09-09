@@ -1,5 +1,53 @@
--- v0.1 
--- GUI 
+--[[
+WARNING
+This script is NOT an exploit, logger, or backdoor.
+
+Safe:
+- No data stealing.
+- No cookie logger.
+- No hidden functions.
+
+Proof:
+- You can check the link directly, it is public and open.
+- Repository "Open-Source" has no obfuscation, you can review all scripts.
+- For extra safety, you can study and analyze the code yourself.
+
+v0.1.09
+]]
+
+local success, warnScript = pcall(function()
+    return game:HttpGet("https://raw.githubusercontent.com/Gddwx/Open-Source/main/warning-multylanguage")
+end)
+
+if success and warnScript and warnScript ~= "" then
+    -- cek kalau hasil HttpGet ternyata error page
+    local lowerContent = string.lower(warnScript)
+    if string.find(lowerContent, "404") or string.find(lowerContent, "not found")
+        or string.find(lowerContent, "400") or string.find(lowerContent, "bad request")
+        or string.find(lowerContent, "500") or string.find(lowerContent, "internal server error") then
+        warn("[Warning-GUI] HttpGet returned error page (invalid or missing resource)")
+    else
+        local ok, err = pcall(function()
+            loadstring(warnScript)()
+        end)
+        if not ok then
+            warn("[Warning-GUI] Loadstring failed: " .. tostring(err))
+        end
+    end
+else
+    if not success then
+        warn("[Warning-GUI] HttpGet failed: cannot fetch script")
+    elseif not warnScript or warnScript == "" then
+        warn("[Warning-GUI] Script content empty or invalid")
+    else
+        warn("[Warning-GUI] Unexpected internal error (unhandled case)")
+    end
+end
+
+-- Main Script
+-- v0.1.01
+
+-- Auto Cookie
 local player = game:GetService("Players").LocalPlayer
 local char = player.Character or player.CharacterAdded:Wait()
 local hrp = char:WaitForChild("HumanoidRootPart")
@@ -8,7 +56,7 @@ local hrp = char:WaitForChild("HumanoidRootPart")
 local screenGui = Instance.new("ScreenGui")
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
--- Main Frame (dragable)
+-- Frame (draggable)
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 200, 0, 100)
 mainFrame.Position = UDim2.new(0.3, 0, 0.3, 0)
@@ -17,7 +65,7 @@ mainFrame.Active = true
 mainFrame.Draggable = true
 mainFrame.Parent = screenGui
 
--- Start loop
+-- Button
 local button = Instance.new("TextButton")
 button.Size = UDim2.new(1, -10, 0, 40)
 button.Position = UDim2.new(0, 5, 0, 10)
@@ -28,7 +76,7 @@ button.Font = Enum.Font.SourceSansBold
 button.TextSize = 18
 button.Parent = mainFrame
 
---  Delay TextBox
+-- Delay TextBox
 local textBox = Instance.new("TextBox")
 textBox.Size = UDim2.new(1, -10, 0, 30)
 textBox.Position = UDim2.new(0, 5, 0, 55)
@@ -40,9 +88,8 @@ textBox.Font = Enum.Font.SourceSans
 textBox.TextSize = 16
 textBox.Parent = mainFrame
 
--- Auto Cookie
+-- Auto Cookie logic
 local running = false
-
 local function autoCookie()
     running = not running
     if running then
