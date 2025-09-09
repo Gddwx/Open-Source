@@ -1,5 +1,12 @@
--- ⚠️ MULTILANGUAGE WARNING CENTER SCREEN
--- v0.3 beta
+-- * MULTILANGUAGE WARNING CENTER SCREEN * --
+
+--[[
+Version v0.3.01
+Function:
+- Show GUI warning in multi-language (bad GUI huh~).
+- Auto disappear after 3 seconds or on click.
+- Destroy GUI after close to save RAM/CPU.
+]]
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
