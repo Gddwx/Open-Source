@@ -1,0 +1,53 @@
+-- ⚠️ MULTILANGUAGE WARNING CENTER SCREEN
+-- v0.3 beta
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local guiWARNINGv001 = Instance.new("ScreenGui")
+guiWARNINGv001.Parent = game:GetService("CoreGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0.85, 0, 0.3, 0)
+frame.Position = UDim2.new(0.075, 0, 0.35, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BackgroundTransparency = 1
+frame.Parent = guiWARNINGv001
+
+local label = Instance.new("TextLabel")
+label.Size = UDim2.new(1, -10, 1, -10)
+label.Position = UDim2.new(0, 5, 0, 5)
+label.BackgroundTransparency = 1
+label.TextColor3 = Color3.fromRGB(255, 220, 0)
+label.TextScaled = true
+label.Font = Enum.Font.SourceSansBold
+label.TextWrapped = true
+label.TextTransparency = 1
+label.Text = [[
+
+⚠️ WARNING: Exploit scripts violate Roblox TOS. (English)
+⚠️ تحذير: استخدام السكربتات غير المصرح بها يعد خرقاً. (Arabic)
+⚠️ ADVERTENCIA: El uso de exploits viola las reglas. (Español)
+⚠️ ПРЕДУПРЕЖДЕНИЕ: Использование эксплойтов нарушает правила. (Русский)
+⚠️ AVISO: Exploits violam as regras do Roblox. (Português)
+⚠️ ATTENTION: Les exploits violent les règles Roblox. (Français)
+⚠️ WARNUNG: Exploits verstoßen gegen Roblox-Regeln. (Deutsch)
+⚠️ 警告: Exploitスクリプトは禁止されています. (日本語)
+⚠️ 경고: 익스플로잇은 규칙 위반입니다. (한국어)
+⚠️ 警告: 使用外挂违反Roblox规定. (中文)
+
+]]
+label.Parent = frame
+
+TweenService:Create(frame, TweenInfo.new(0.5), {BackgroundTransparency = 0.35}):Play()
+TweenService:Create(label, TweenInfo.new(0.5), {TextTransparency = 0}):Play()
+
+task.delay(3, function()
+    TweenService:Create(frame, TweenInfo.new(0.5), {BackgroundTransparency = 1}):Play()
+    TweenService:Create(label, TweenInfo.new(0.5), {TextTransparency = 1}):Play()
+    task.wait(0.6)
+    if guiWARNINGv001 then guiWARNINGv001:Destroy() end
+end)
+
+UserInputService.InputBegan:Connect(function()
+    if guiWARNINGv001 then guiWARNINGv001:Destroy() end
+end)
