@@ -40,7 +40,7 @@ textBox.Font = Enum.Font.SourceSans
 textBox.TextSize = 16
 textBox.Parent = mainFrame
 
--- Fungsi Auto Cookie
+-- Funct Auto Cookie
 local running = false
 
 local function autoCookie()
@@ -50,7 +50,7 @@ local function autoCookie()
         local originalCFrame = hrp.CFrame
 
         while running do
-            local delayTime = tonumber(textBox.Text) or 0.2 -- kalau salah input default 0.2
+            local delayTime = tonumber(textBox.Text) or 0.2 --default 0.2
             for _, item in pairs(workspace.Map.Functional.SpawnedItems:GetChildren()) do
                 local prompt = item:FindFirstChild("CookiePrompt", true)
                 if prompt then
