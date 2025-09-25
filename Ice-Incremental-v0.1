@@ -1,0 +1,243 @@
+--[[
+WARNING
+This script is NOT an exploit, logger, or backdoor.
+
+Safe:
+- No data stealing.
+- No cookie logger.
+- No hidden functions.
+
+Proof:
+- You can check the link directly, it is public and open.
+- Repository "Open-Source" has no obfuscation, you can review all scripts.
+- For extra safety, you can study and analyze the code yourself.
+
+v0.1.09
+]]
+
+local success, warnScript = pcall(function()
+    return game:HttpGet("https://raw.githubusercontent.com/Gddwx/Open-Source/main/warning-multylanguage")
+end)
+
+if success and warnScript and warnScript ~= "" then
+    -- cek kalau hasil HttpGet ternyata error page
+    local lowerContent = string.lower(warnScript)
+    if string.find(lowerContent, "404") or string.find(lowerContent, "not found")
+        or string.find(lowerContent, "400") or string.find(lowerContent, "bad request")
+        or string.find(lowerContent, "500") or string.find(lowerContent, "internal server error") then
+        warn("[Warning-GUI] HttpGet returned error page (invalid or missing resource)")
+    else
+        local ok, err = pcall(function()
+            loadstring(warnScript)()
+        end)
+        if not ok then
+            warn("[Warning-GUI] Loadstring failed: " .. tostring(err))
+        end
+    end
+else
+    if not success then
+        warn("[Warning-GUI] HttpGet failed: cannot fetch script")
+    elseif not warnScript or warnScript == "" then
+        warn("[Warning-GUI] Script content empty or invalid")
+    else
+        warn("[Warning-GUI] Unexpected internal error (unhandled case)")
+    end
+end
+
+-- Main Script
+--  V0.4 added worst GUI
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+local originalCFrame = humanoidRootPart.CFrame
+
+local teleportRunning = false
+local buyRunning = false
+local rebirthRunning = false
+local upgrdRunning = false
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ModernAutoFarmGui"
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 260, 0, 280)
+frame.Position = UDim2.new(0.5, -130, 0.5, -140)
+frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+frame.BackgroundTransparency = 0.1
+frame.Active = true
+frame.Draggable = true
+frame.Parent = screenGui
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 15)
+corner.Parent = frame
+
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 2
+stroke.Color = Color3.fromRGB(100, 100, 255)
+stroke.Parent = frame
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 10)
+layout.FillDirection = Enum.FillDirection.Vertical
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout.VerticalAlignment = Enum.VerticalAlignment.Top
+layout.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Text = " Auto Farm Menu "
+title.Size = UDim2.new(1, -10, 0, 40)
+title.BackgroundTransparency = 1
+title.TextColor3 = Color3.fromRGB(200, 200, 255)
+title.Font = Enum.Font.GothamBold
+title.TextScaled = true
+title.Parent = frame
+
+local function createButton(text)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0.9, 0, 0, 45)
+	button.Text = text
+	button.BackgroundColor3 = Color3.fromRGB(70, 130, 250)
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.Font = Enum.Font.GothamBold
+	button.TextScaled = true
+
+	local bcorner = Instance.new("UICorner")
+	bcorner.CornerRadius = UDim.new(0, 10)
+	bcorner.Parent = button
+
+	local bstroke = Instance.new("UIStroke")
+	bstroke.Thickness = 1.5
+	bstroke.Color = Color3.fromRGB(255, 255, 255)
+	bstroke.Parent = button
+
+	button.MouseEnter:Connect(function()
+		button.BackgroundColor3 = Color3.fromRGB(90, 150, 255)
+	end)
+	button.MouseLeave:Connect(function()
+		button.BackgroundColor3 = Color3.fromRGB(70, 130, 250)
+	end)
+
+	button.Parent = frame
+	return button
+end
+
+local teleportButton = createButton("Start Teleport")
+local buyButton = createButton("Start Auto Buy")
+local rebirthButton = createButton("Start Auto Rebirth")
+local upgrdButton = createButton("Start Auto Upgrd")
+
+local closeButton = createButton("X Close Menu")
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+
+local function teleportLoop()
+	while teleportRunning do
+		local folder = workspace:FindFirstChild("IceFolder")
+		if folder then
+			local children = folder:GetChildren()
+			if #children > 0 then
+				for i = 1, #children do
+					if not teleportRunning then break end
+					local part = children[i]
+					if part and part:IsA("BasePart") and humanoidRootPart then
+						humanoidRootPart.CFrame = part.CFrame + Vector3.new(0, 5, 0)
+					end
+					task.wait(0.1)
+				end
+			end
+		end
+		task.wait(1)
+	end
+end
+
+local function buyLoop()
+	local BuyEvent = game:GetService("ReplicatedStorage"):WaitForChild("BuyEvents"):WaitForChild("BuyIceUpgrade")
+	local index = 1
+	while buyRunning do
+		local args = {index, "Single"}
+		BuyEvent:FireServer(unpack(args))
+		index = index + 1
+		if index > 4 then index = 1 end
+		task.wait(0.5)
+	end
+end
+
+local function rebirthLoop()
+	local RebirthEvent = game:GetService("ReplicatedStorage"):WaitForChild("Resets"):WaitForChild("Frost")
+	while rebirthRunning do
+		RebirthEvent:FireServer()
+		task.wait(1)
+	end
+end
+
+local function upgrdLoop()
+	local UpgrdEvent = game:GetService("ReplicatedStorage"):WaitForChild("BuyEvents"):WaitForChild("BuyBlizzardUpgrade")
+	local queue = {3, 2, 1}
+	local index = 1
+	while upgrdRunning do
+		local args = {queue[index], "Single"}
+		UpgrdEvent:FireServer(unpack(args))
+		index = index + 1
+		if index > #queue then index = 1 end
+		task.wait(0.5)
+	end
+end
+
+teleportButton.MouseButton1Click:Connect(function()
+	if teleportRunning then
+		teleportRunning = false
+		teleportButton.Text = "Start Teleport"
+		humanoidRootPart.CFrame = originalCFrame
+	else
+		teleportRunning = true
+		teleportButton.Text = "Stop Teleport"
+		task.spawn(teleportLoop)
+	end
+end)
+
+buyButton.MouseButton1Click:Connect(function()
+	if buyRunning then
+		buyRunning = false
+		buyButton.Text = "Start Auto Buy"
+	else
+		buyRunning = true
+		buyButton.Text = "Stop Auto Buy"
+		task.spawn(buyLoop)
+	end
+end)
+
+rebirthButton.MouseButton1Click:Connect(function()
+	if rebirthRunning then
+		rebirthRunning = false
+		rebirthButton.Text = "Start Auto Rebirth"
+	else
+		rebirthRunning = true
+		rebirthButton.Text = "Stop Auto Rebirth"
+		task.spawn(rebirthLoop)
+	end
+end)
+
+upgrdButton.MouseButton1Click:Connect(function()
+	if upgrdRunning then
+		upgrdRunning = false
+		upgrdButton.Text = "Start Auto Upgrd"
+	else
+		upgrdRunning = true
+		upgrdButton.Text = "Stop Auto Upgrd"
+		task.spawn(upgrdLoop)
+	end
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+	teleportRunning = false
+	buyRunning = false
+	rebirthRunning = false
+	upgrdRunning = false
+	screenGui:Destroy()
+end)
+— Thnx for Using my script
