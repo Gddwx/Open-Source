@@ -1,0 +1,202 @@
+--// MUSIC GUI SCRIPT (FINAL UPGRADE) //--
+
+-- anti-duplicate GUI
+if game.Players.LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("MusicGui") then
+    game.Players.LocalPlayer.PlayerGui.MusicGui:Destroy()
+end
+
+-- music IDs list (delete or replace id) may not all musicworks
+local ids = {
+16020059034,15052289256,15361747217,430315987,16626200656,
+111786155264533,1836468029,294861193,16026599722,1545630949,
+16026842376,16026218445,15417082128,16027046657,121410270456315,
+95924511274022,102466357949905,71544919965530,80002560355881,
+109676875973473,70728878579654,131945942036753,135776073786266,
+124473358882097,126649476249768,72428040333847,138225198741737,
+128384179408948,83180525415437,103772191036803,136923691675042,
+95636650947538,74679884259234,125274026139127,99183404112447,
+115142456427170,112042379872154,111884937127855,91427510058097,
+125938154158568,78785333929248,101225266758940,73692542184481,
+100523347589539,117411978804923,112541601134638,121027339152999,
+86970224373904,112657073217684,119803849830947,122892327895106,
+101735788064745,127580222133706,85219955858048,118507373399694,
+97469791822306,114064544192792,90627119202018,131946583129041,
+107424491541808,139388235328030
+}
+
+local player = game.Players.LocalPlayer
+local gui = Instance.new("ScreenGui")
+gui.Name = "MusicGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+-- main frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 300, 0, 350)
+mainFrame.Position = UDim2.new(0.2, 0, 0.2, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+mainFrame.BackgroundTransparency = 0.2
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = gui
+
+-- drag bar strip
+local dragBar = Instance.new("Frame")
+dragBar.Size = UDim2.new(1, 0, 0, 10)
+dragBar.Position = UDim2.new(0, 0, 1, -10)
+dragBar.BackgroundColor3 = Color3.fromRGB(80,80,80)
+dragBar.BackgroundTransparency = 0.2
+dragBar.Active = true
+dragBar.Draggable = true
+dragBar.Parent = mainFrame
+
+-- close button (X)
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+closeButton.BackgroundTransparency = 0.2
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255,255,255)
+closeButton.Font = Enum.Font.SourceSansBold
+closeButton.TextSize = 20
+closeButton.Parent = mainFrame
+
+closeButton.MouseButton1Click:Connect(function()
+    gui:Destroy()
+end)
+
+-- minimize button (-)
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size = UDim2.new(0, 30, 0, 30)
+minimizeButton.Position = UDim2.new(1, -70, 0, 5)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(200, 170, 0)
+minimizeButton.BackgroundTransparency = 0.2
+minimizeButton.Text = "-"
+minimizeButton.TextColor3 = Color3.fromRGB(255,255,255)
+minimizeButton.Font = Enum.Font.SourceSansBold
+minimizeButton.TextSize = 20
+minimizeButton.Parent = mainFrame
+
+-- search bar
+local searchBox = Instance.new("TextBox")
+searchBox.Size = UDim2.new(0, 260, 0, 30)
+searchBox.Position = UDim2.new(0, 20, 0, 10)
+searchBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+searchBox.BackgroundTransparency = 0.2
+searchBox.TextColor3 = Color3.fromRGB(255,255,255)
+searchBox.PlaceholderText = "Search music ID..."
+searchBox.Font = Enum.Font.SourceSans
+searchBox.TextSize = 18
+searchBox.Parent = mainFrame
+
+-- scrolling list
+local scrolling = Instance.new("ScrollingFrame")
+scrolling.Size = UDim2.new(0, 260, 0, 230)
+scrolling.Position = UDim2.new(0, 20, 0, 50)
+scrolling.BackgroundColor3 = Color3.fromRGB(40,40,40)
+scrolling.BackgroundTransparency = 0.2
+scrolling.ScrollBarThickness = 6
+scrolling.CanvasSize = UDim2.new(0,0,0,0)
+scrolling.Parent = mainFrame
+
+-- template
+local template = Instance.new("TextButton")
+template.Visible = false
+template.Size = UDim2.new(0,240,0,30)
+template.BackgroundColor3 = Color3.fromRGB(60,60,60)
+template.BackgroundTransparency = 0.2
+template.TextColor3 = Color3.fromRGB(255,255,255)
+template.Font = Enum.Font.SourceSansBold
+template.TextSize = 18
+template.Parent = scrolling
+
+-- play button
+local playButton = Instance.new("TextButton")
+playButton.Size = UDim2.new(0,260,0,40)
+playButton.Position = UDim2.new(0, 20, 1, -50)
+playButton.BackgroundColor3 = Color3.fromRGB(0,170,0)
+playButton.BackgroundTransparency = 0.2
+playButton.Text = "Play Selected"
+playButton.TextColor3 = Color3.fromRGB(255,255,255)
+playButton.Font = Enum.Font.SourceSansBold
+playButton.TextSize = 20
+playButton.Parent = mainFrame
+
+-- variables
+local gddwx_selectedId = nil
+local gddwx_selectedButton = nil
+local gddwx_buttonList = {}
+local gddwx_minimized = false
+
+-- function to render the list
+local function renderList(filter)
+    for _, b in pairs(gddwx_buttonList) do b:Destroy() end
+    gddwx_buttonList = {}
+
+    local count = 0
+    for _, id in ipairs(ids) do
+        if not filter or tostring(id):find(filter) then
+            count += 1
+            local newButton = template:Clone()
+            newButton.Visible = true
+            newButton.Parent = scrolling
+            newButton.Text = tostring(id)
+            newButton.Position = UDim2.new(0, 0, 0, (count - 1) * (template.Size.Y.Offset + 5))
+
+            newButton.MouseButton1Click:Connect(function()
+                gddwx_selectedId = id
+                print("Selected ID:", gddwx_selectedId)
+
+                if gddwx_selectedButton then
+                    gddwx_selectedButton.BackgroundColor3 = Color3.fromRGB(60,60,60)
+                end
+                newButton.BackgroundColor3 = Color3.fromRGB(0,170,255)
+                gddwx_selectedButton = newButton
+            end)
+
+            table.insert(gddwx_buttonList, newButton)
+        end
+    end
+
+    scrolling.CanvasSize = UDim2.new(0,0,0,count * (template.Size.Y.Offset + 5))
+end
+
+-- initial render
+renderList()
+
+-- search filter
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    renderList(searchBox.Text ~= "" and searchBox.Text or nil)
+end)
+
+-- play button action
+playButton.MouseButton1Click:Connect(function()
+    if gddwx_selectedId then
+        print("Sending to server with ID:", gddwx_selectedId)
+        local args = {
+            "!playsound " .. gddwx_selectedId .. " !music " .. gddwx_selectedId .. " !sound " .. gddwx_selectedId,
+            true,
+            "" -- work in public server (not in private server)
+        }
+        game.Lighting:WaitForChild("Command"):FireServer(unpack(args))
+    else
+        warn("No ID selected!")
+    end
+end)
+
+-- minimize toggle
+minimizeButton.MouseButton1Click:Connect(function()
+    gddwx_minimized = not gddwx_minimized
+    if gddwx_minimized then
+        searchBox.Visible = false
+        scrolling.Visible = false
+        playButton.Position = UDim2.new(0,20,0,50)
+        mainFrame.Size = UDim2.new(0, 300, 0, 100)
+    else
+        searchBox.Visible = true
+        scrolling.Visible = true
+        playButton.Position = UDim2.new(0,20,1,-50)
+        mainFrame.Size = UDim2.new(0, 300, 0, 350)
+    end
+end)
