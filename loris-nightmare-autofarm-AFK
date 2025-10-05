@@ -1,0 +1,98 @@
+-- AUTOFARM + SERVER HOP FAST + SAFE (>2 slot) + 2 SEC AFTER TELEPORT
+
+local SCRIPT_URL = "https://raw.githubusercontent.com/Gddwx/Open-Source/main/loris-nightmare-autofarm-AFK"
+
+if queue_on_teleport then
+    queue_on_teleport(("loadstring(game:HttpGet('%s'))()"):format(SCRIPT_URL))
+end
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+
+math.randomseed(tick())
+
+local targetNames = {"Coins1","Coins2","Coins3","Coins4","Treasure","Chest"}
+
+local function waitForPlayer()
+    local player = Players.LocalPlayer
+    if not player then repeat task.wait() until Players.LocalPlayer player = Players.LocalPlayer end
+    local character = player.Character or player.CharacterAdded:Wait()
+    local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart")
+    return player, character, hrp
+end
+
+local function scanTargets()
+    local _, _, hrp = waitForPlayer()
+    local loopCounter = 0
+
+    while true do
+        task.wait(0.01)
+        local found = false
+
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if table.find(targetNames, obj.Name) then
+                if obj:IsA("BasePart") then
+                    pcall(function() hrp.CFrame = obj.CFrame + Vector3.new(0,0.1,0) end)
+                    found = true
+                    break
+                elseif obj:IsA("Model") and obj.PrimaryPart then
+                    pcall(function() hrp.CFrame = obj.PrimaryPart.CFrame end)
+                    found = true
+                    break
+                end
+            end
+        end
+
+        if found then return true end
+
+        loopCounter = loopCounter + 1
+        if loopCounter >= 10 then return false end
+    end
+end
+
+local function fetchServers()
+    local ok, res = pcall(function()
+        local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(game.PlaceId)
+        local txt = game:HttpGet(url)
+        return HttpService:JSONDecode(txt)
+    end)
+    if not ok or not res or not res.data then return {} end
+    return res.data
+end
+
+local function serverHop()
+    local data = fetchServers()
+    local candidates = {}
+    local currentId = tostring(game.JobId or "")
+
+    for _, s in ipairs(data) do
+        local maxPlayers = s.maxPlayers or 0
+        local playing = s.playing or 0
+        if s.id and tostring(s.id) ~= currentId and (maxPlayers - playing) > 2 then
+            table.insert(candidates, s)
+        end
+    end
+
+    if #candidates == 0 then return false end
+
+    local pick = candidates[math.random(1, #candidates)]
+    TeleportService:TeleportToPlaceInstance(game.PlaceId, pick.id, Players.LocalPlayer)
+    return true
+end
+
+-- MAIN LOOP (same urutan as versi lama)
+while true do
+    local found = scanTargets()
+    if found then
+        task.wait(0.01)
+    else
+        local hopped = serverHop()
+        if hopped then
+            task.wait(2) -- after teleport, wait server render
+            break
+        else
+            task.wait(0.1)
+        end
+    end
+end
