@@ -1,0 +1,375 @@
+--[[
+WARNING
+This script is NOT an exploit, logger, or backdoor.
+
+Safe:
+- No data stealing.
+- No cookie logger.
+- No hidden functions.
+
+Proof:
+- You can check the link directly, it is public and open.
+- Repository "Open-Source" has no obfuscation, you can review all scripts.
+- For extra safety, you can study and analyze the code yourself.
+
+v0.1.09
+]]
+
+local success, warnScript = pcall(function()
+    return game:HttpGet("https://raw.githubusercontent.com/Gddwx/Open-Source/main/warning-multylanguage")
+end)
+
+if success and warnScript and warnScript ~= "" then
+    -- check if , HttpGet = error page
+    local lowerContent = string.lower(warnScript)
+    if string.find(lowerContent, "404") or string.find(lowerContent, "not found")
+        or string.find(lowerContent, "400") or string.find(lowerContent, "bad request")
+        or string.find(lowerContent, "500") or string.find(lowerContent, "internal server error") then
+        warn("[Warning-GUI] HttpGet returned error page (invalid or missing resource)")
+    else
+        local ok, err = pcall(function()
+            loadstring(warnScript)()
+        end)
+        if not ok then
+            warn("[Warning-GUI] Loadstring failed: " .. tostring(err))
+        end
+    end
+else
+    if not success then
+        warn("[Warning-GUI] HttpGet failed: cannot fetch script")
+    elseif not warnScript or warnScript == "" then
+        warn("[Warning-GUI] Script content empty or invalid")
+    else
+        warn("[Warning-GUI] Unexpected internal error (unhandled case)")
+    end
+end
+
+-- Main Script
+--[[
+v0.1.12 - Fixed cooldown auto-cancel triggered by previous tap
+]]
+
+if game.CoreGui:FindFirstChild("_AutoRunGUI") then
+	game.CoreGui._AutoRunGUI:Destroy()
+end
+
+local player = game.Players.LocalPlayer
+local mouse = player:GetMouse()
+local uis = game:GetService("UserInputService")
+local ts = game:GetService("TweenService")
+
+local function createMainGUI()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "_AutoRunGUI"
+	gui.ResetOnSpawn = false
+	gui.Parent = game.CoreGui
+
+	-- Main Container dengan shadow effect
+	local mainContainer = Instance.new("Frame")
+	mainContainer.Size = UDim2.new(0, 220, 0, 100)
+	mainContainer.Position = UDim2.new(0, 10, 0, 0)
+	mainContainer.BackgroundTransparency = 1
+	mainContainer.Parent = gui
+
+	-- Shadow Effect
+	local shadow = Instance.new("ImageLabel")
+	shadow.Size = UDim2.new(1, 10, 1, 10)
+	shadow.Position = UDim2.new(0, -5, 0, -5)
+	shadow.BackgroundTransparency = 1
+	shadow.Image = "rbxassetid://1316045217"
+	shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+	shadow.ImageTransparency = 0.8
+	shadow.ScaleType = Enum.ScaleType.Slice
+	shadow.SliceScale = 0.02
+	shadow.Parent = mainContainer
+
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Size = UDim2.new(1, 0, 1, 0)
+	mainFrame.Position = UDim2.new(0, 0, 0, 0)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+	mainFrame.BackgroundTransparency = 1
+	mainFrame.Active = true
+	mainFrame.Draggable = true
+	mainFrame.Parent = mainContainer
+
+	-- Rounded Corners
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = mainFrame
+
+	-- Gradient Background
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 40, 45)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 30, 35))
+	})
+	gradient.Rotation = 45
+	gradient.Parent = mainFrame
+
+	-- Header dengan accent color
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1, 0, 0, 40)
+	header.Position = UDim2.new(0, 0, 0, 0)
+	header.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+	header.BackgroundTransparency = 1
+	header.Parent = mainFrame
+
+	local headerCorner = Instance.new("UICorner")
+	headerCorner.CornerRadius = UDim.new(0, 12)
+	headerCorner.Parent = header
+
+	-- Accent Line
+	local accentLine = Instance.new("Frame")
+	accentLine.Size = UDim2.new(1, 0, 0, 3)
+	accentLine.Position = UDim2.new(0, 0, 0, 37)
+	accentLine.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+	accentLine.BorderSizePixel = 0
+	accentLine.Parent = header
+
+	local accentGradient = Instance.new("UIGradient")
+	accentGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 170, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(85, 170, 255))
+	})
+	accentGradient.Parent = accentLine
+
+	-- Title dengan icon
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, -50, 1, 0)
+	title.Position = UDim2.new(0, 15, 0, 0)
+	title.BackgroundTransparency = 1
+	title.Text = "Auto Run Permanent!"
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.Font = Enum.Font.GothamBold
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextSize = 16
+	title.Parent = header
+
+	-- Modern Close Button
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 30, 0, 30)
+	closeBtn.Position = UDim2.new(1, -35, 0, 5)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 65)
+	closeBtn.Text = "×"
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 20
+	closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeBtn.AutoButtonColor = false
+	closeBtn.Parent = header
+
+	local closeCorner = Instance.new("UICorner")
+	closeCorner.CornerRadius = UDim.new(0, 8)
+	closeCorner.Parent = closeBtn
+
+	-- Hover effects untuk close button
+	closeBtn.MouseEnter:Connect(function()
+		ts:Create(closeBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(220, 60, 60)}):Play()
+	end)
+	
+	closeBtn.MouseLeave:Connect(function()
+		ts:Create(closeBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(60, 60, 65)}):Play()
+	end)
+
+	closeBtn.MouseButton1Click:Connect(function()
+		ts:Create(mainFrame, TweenInfo.new(0.3), {BackgroundTransparency = 1, Size = UDim2.new(0, 0, 0, 0)}):Play()
+		ts:Create(shadow, TweenInfo.new(0.3), {ImageTransparency = 1}):Play()
+		task.wait(0.3)
+		gui:Destroy()
+	end)
+
+	-- Content Area
+	local content = Instance.new("Frame")
+	content.Size = UDim2.new(1, -20, 1, -60)
+	content.Position = UDim2.new(0, 10, 0, 50)
+	content.BackgroundTransparency = 1
+	content.Parent = mainFrame
+
+	-- Description Text
+	local descLabel = Instance.new("TextLabel")
+	descLabel.Size = UDim2.new(1, 0, 0, 40)
+	descLabel.Position = UDim2.new(0, 0, 0, 0)
+	descLabel.BackgroundTransparency = 0.8
+	descLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+	descLabel.Font = Enum.Font.Gotham
+	descLabel.TextSize = 11
+	descLabel.TextWrapped = true
+	descLabel.TextXAlignment = Enum.TextXAlignment.Left
+	descLabel.TextYAlignment = Enum.TextYAlignment.Top
+	descLabel.Text = "Auto-farm will stop until there is a bug/error"
+	descLabel.Parent = content
+
+	-- Modern Yes Button
+	local yesBtn = Instance.new("TextButton")
+	yesBtn.Size = UDim2.new(0.5, 0, 0, 20)
+	yesBtn.Position = UDim2.new(0.5, 0, 0.6, 0)
+	yesBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+	yesBtn.Text = "RUN"
+	yesBtn.Font = Enum.Font.GothamBold
+	yesBtn.TextSize = 13
+	yesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	yesBtn.AutoButtonColor = false
+	yesBtn.Parent = content
+
+	local yesCorner = Instance.new("UICorner")
+	yesCorner.CornerRadius = UDim.new(0, 10)
+	yesCorner.Parent = yesBtn
+
+	local yesStroke = Instance.new("UIStroke")
+	yesStroke.Color = Color3.fromRGB(100, 200, 255)
+	yesStroke.Thickness = 2
+	yesStroke.Parent = yesBtn
+
+	-- Hover effects untuk yes button
+	yesBtn.MouseEnter:Connect(function()
+		ts:Create(yesBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(20, 190, 255)}):Play()
+		ts:Create(yesStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(150, 220, 255)}):Play()
+	end)
+	
+	yesBtn.MouseLeave:Connect(function()
+		ts:Create(yesBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 170, 255)}):Play()
+		ts:Create(yesStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(100, 200, 255)}):Play()
+	end)
+
+	-- Animate in
+	ts:Create(mainFrame, TweenInfo.new(0.5), {BackgroundTransparency = 0}):Play()
+	ts:Create(header, TweenInfo.new(0.5), {BackgroundTransparency = 0}):Play()
+	ts:Create(shadow, TweenInfo.new(0.5), {ImageTransparency = 0.6}):Play()
+
+	yesBtn.MouseButton1Click:Connect(function()
+		-- Animate out main GUI
+		ts:Create(mainFrame, TweenInfo.new(0.3), {BackgroundTransparency = 1, Size = UDim2.new(0, 0, 0, 0)}):Play()
+		ts:Create(shadow, TweenInfo.new(0.3), {ImageTransparency = 1}):Play()
+		
+		task.wait(0.3)
+		mainContainer:Destroy()
+
+		-- Cooldown GUI Modern
+		local cdContainer = Instance.new("Frame")
+		cdContainer.Size = UDim2.new(0, 400, 0, 25)
+		cdContainer.Position = UDim2.new(0.5, -200, 0.5, -80)
+		cdContainer.BackgroundTransparency = 1
+		cdContainer.Parent = gui
+
+		local cdShadow = Instance.new("ImageLabel")
+		cdShadow.Size = UDim2.new(1, 10, 1, 10)
+		cdShadow.Position = UDim2.new(0, -5, 0, -5)
+		cdShadow.BackgroundTransparency = 1
+		cdShadow.Image = "rbxassetid://1316045217"
+		cdShadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+		cdShadow.ImageTransparency = 0.8
+		cdShadow.ScaleType = Enum.ScaleType.Slice
+		cdShadow.SliceScale = 0.02
+		cdShadow.Parent = cdContainer
+
+		local cdGui = Instance.new("Frame")
+		cdGui.Size = UDim2.new(1, 0, 1, 0)
+		cdGui.Position = UDim2.new(0, 0, 0, 0)
+		cdGui.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+		cdGui.BackgroundTransparency = 1
+		cdGui.Active = true
+		cdGui.Parent = cdContainer
+
+		local cdCorner = Instance.new("UICorner")
+		cdCorner.CornerRadius = UDim.new(0, 12)
+		cdCorner.Parent = cdGui
+
+		local cdGradient = Instance.new("UIGradient")
+		cdGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 40, 45)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 30, 35))
+		})
+		cdGradient.Rotation = 45
+		cdGradient.Parent = cdGui
+
+		-- Circular Countdown
+		local circleFrame = Instance.new("Frame")
+		circleFrame.Size = UDim2.new(0, 60, 0, 60)
+		circleFrame.Position = UDim2.new(0.5, -30, 0.2, -30)
+		circleFrame.BackgroundTransparency = 1
+		circleFrame.Parent = cdGui
+
+		local circle = Instance.new("ImageLabel")
+		circle.Size = UDim2.new(1, 0, 1, 0)
+		circle.BackgroundTransparency = 1
+		circle.Image = "rbxassetid://13770377625"
+		circle.ImageColor3 = Color3.fromRGB(0, 170, 255)
+		circle.Parent = circleFrame
+
+		local cdLabel = Instance.new("TextLabel")
+		cdLabel.Size = UDim2.new(1, 0, 1, 0)
+		cdLabel.BackgroundTransparency = 1
+		cdLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		cdLabel.Font = Enum.Font.GothamBold
+		cdLabel.TextScaled = true
+		cdLabel.Text = "3"
+		cdLabel.Parent = circleFrame
+
+		local infoLabel = Instance.new("TextLabel")
+		infoLabel.Size = UDim2.new(1, -20, 0, 40)
+		infoLabel.Position = UDim2.new(0, 10, 0.7, 0)
+		infoLabel.BackgroundTransparency = 1
+		infoLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+		infoLabel.Font = Enum.Font.Gotham
+		infoLabel.TextSize = 13
+		infoLabel.TextWrapped = true
+		infoLabel.Text = "Click Anywhere to Cancel"
+		infoLabel.Parent = cdGui
+
+		-- Animate in cooldown GUI
+		ts:Create(cdGui, TweenInfo.new(0.5), {BackgroundTransparency = 0}):Play()
+		ts:Create(cdShadow, TweenInfo.new(0.5), {ImageTransparency = 0.6}):Play()
+
+		local canceled = false
+		local startTime = tick()
+
+		-- Delay agar tap Yes tidak dihitung cancel
+		task.wait(0.3)
+
+		local function cancel()
+			if canceled then return end
+			canceled = true
+			if cdContainer then
+				ts:Create(cdGui, TweenInfo.new(0.3), {BackgroundTransparency = 1, Size = UDim2.new(0, 0, 0, 0)}):Play()
+				ts:Create(cdShadow, TweenInfo.new(0.3), {ImageTransparency = 1}):Play()
+				task.wait(0.3)
+				cdContainer:Destroy()
+				createMainGUI()
+			end
+		end
+
+		-- Listener input
+		local conn1 = mouse.Button1Down:Connect(cancel)
+		local conn2 = uis.TouchTap:Connect(cancel)
+		local conn3 = uis.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.Keyboard then
+				cancel()
+			end
+		end)
+
+		-- Countdown dengan animasi circle
+		task.spawn(function()
+			while not canceled do
+				local remain = math.max(0, 3 - (tick() - startTime))
+				cdLabel.Text = tostring(math.ceil(remain))
+				
+				-- Animate circle rotation
+				ts:Create(circle, TweenInfo.new(0.1), {Rotation = circle.Rotation + 10}):Play()
+				
+				if remain <= 0 then break end
+				task.wait(0.1)
+			end
+			if not canceled then
+				conn1:Disconnect()
+				conn2:Disconnect()
+				conn3:Disconnect()
+				loadstring(game:HttpGet("https://raw.githubusercontent.com/Gddwx/Open-Source/main/loris-nightmare-autofarm-AFK"))()
+				ts:Create(cdGui, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+				ts:Create(cdShadow, TweenInfo.new(0.3), {ImageTransparency = 1}):Play()
+				task.wait(0.3)
+				cdContainer:Destroy()
+			end
+		end)
+	end)
+end
+
+createMainGUI()
