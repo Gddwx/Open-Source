@@ -1,35 +1,51 @@
--- AUTOFARM + SERVER HOP FAST + SAFE (>2 slot) + 2 SEC AFTER TELEPORT
+--[[
+AUTOFARM AFK
+~64 coins/min or 3840 coins/hour
+Fixes:
+- Error Code 701
+- Error Code 702
+- Error Code 772 / 771 (server full / gone)
+]]
 
+-- CONFIGURATION
+local minimumSlotForMe = 1 -- minimum slot I need
+local retryAttempt = 0      -- server hop retry counter
+local teleporting = false   -- prevent teleport spam
 local SCRIPT_URL = "https://raw.githubusercontent.com/Gddwx/Open-Source/main/loris-nightmare-autofarm-AFK"
+local slotThreshold = minimumSlotForMe - 1
+local minPlayersActive = 1 -- optional: filter out very empty servers
 
+-- QUEUE ON TELEPORT
 if queue_on_teleport then
     queue_on_teleport(("loadstring(game:HttpGet('%s'))()"):format(SCRIPT_URL))
 end
 
+-- SERVICES
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 
 math.randomseed(tick())
 
+-- TARGETS
 local targetNames = {"Coins1","Coins2","Coins3","Coins4","Treasure","Chest"}
 
+-- WAIT FOR PLAYER FUNCTION
 local function waitForPlayer()
-    local player = Players.LocalPlayer
-    if not player then repeat task.wait() until Players.LocalPlayer player = Players.LocalPlayer end
-    local character = player.Character or player.CharacterAdded:Wait()
-    local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart")
-    return player, character, hrp
+    local p = Players.LocalPlayer
+    if not p then repeat task.wait() until Players.LocalPlayer p = Players.LocalPlayer end
+    local c = p.Character or p.CharacterAdded:Wait()
+    local hrp = c:FindFirstChild("HumanoidRootPart") or c:WaitForChild("HumanoidRootPart")
+    return p, c, hrp
 end
 
+-- SCAN TARGETS
 local function scanTargets()
     local _, _, hrp = waitForPlayer()
     local loopCounter = 0
-
     while true do
-        task.wait(0.01)
+        task.wait(0.05)
         local found = false
-
         for _, obj in ipairs(workspace:GetDescendants()) do
             if table.find(targetNames, obj.Name) then
                 if obj:IsA("BasePart") then
@@ -37,62 +53,94 @@ local function scanTargets()
                     found = true
                     break
                 elseif obj:IsA("Model") and obj.PrimaryPart then
-                    pcall(function() hrp.CFrame = obj.PrimaryPart.CFrame end)
+                    pcall(function() hrp.CFrame = obj.PrimaryPart.CFrame + Vector3.new(0,0,0) end)
                     found = true
                     break
                 end
             end
         end
-
         if found then return true end
-
-        loopCounter = loopCounter + 1
-        if loopCounter >= 10 then return false end
+        loopCounter += 1
+        if loopCounter >= 2 then return false end
     end
 end
 
+-- FETCH SERVERS
 local function fetchServers()
-    local ok, res = pcall(function()
-        local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(game.PlaceId)
-        local txt = game:HttpGet(url)
-        return HttpService:JSONDecode(txt)
-    end)
-    if not ok or not res or not res.data then return {} end
-    return res.data
+    local servers = {}
+    local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(game.PlaceId)
+    local cursor = nil
+    for _ = 1, 3 do
+        local fullUrl = url .. (cursor and ("&cursor="..cursor) or "")
+        local ok, txt = pcall(function() return game:HttpGet(fullUrl) end)
+        if not ok or not txt then break end
+        local ok2, data = pcall(function() return HttpService:JSONDecode(txt) end)
+        if not ok2 or not data or not data.data then break end
+        for _, s in ipairs(data.data) do table.insert(servers, s) end
+        if not data.nextPageCursor then break end
+        cursor = data.nextPageCursor
+    end
+    return servers
 end
 
+-- TRY TELEPORT
+local function tryTeleport(inst)
+    if teleporting or not inst or not inst.id then return false end
+    teleporting = true
+    local ok = pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, inst.id, Players.LocalPlayer)
+    end)
+    return ok
+end
+
+-- SERVER HOP
 local function serverHop()
     local data = fetchServers()
-    local candidates = {}
+    if #data == 0 then return false end
     local currentId = tostring(game.JobId or "")
+    local list = {}
 
     for _, s in ipairs(data) do
-        local maxPlayers = s.maxPlayers or 0
-        local playing = s.playing or 0
-        if s.id and tostring(s.id) ~= currentId and (maxPlayers - playing) > 2 then
-            table.insert(candidates, s)
+        local slotsAvailable = s.maxPlayers - s.playing
+        if s.id and tostring(s.id) ~= currentId
+           and slotsAvailable > slotThreshold
+           and s.playing >= minPlayersActive then
+            table.insert(list, s)
         end
     end
 
-    if #candidates == 0 then return false end
+    if #list == 0 then return false end
 
-    local pick = candidates[math.random(1, #candidates)]
-    TeleportService:TeleportToPlaceInstance(game.PlaceId, pick.id, Players.LocalPlayer)
-    return true
+    -- shuffle list
+    for i = #list, 2, -1 do
+        local j = math.random(1, i)
+        list[i], list[j] = list[j], list[i]
+    end
+
+    -- try teleport
+    for _, s in ipairs(list) do
+        if tryTeleport(s) then return true end
+        task.wait(0.2)
+    end
+
+    return false
 end
 
--- MAIN LOOP (same urutan as versi lama)
+-- MAIN LOOP
 while true do
     local found = scanTargets()
     if found then
-        task.wait(0.01)
+        task.wait(0.05)
     else
         local hopped = serverHop()
-        if hopped then
-            task.wait(2) -- after teleport, wait server render
-            break
+        if not hopped then
+            retryAttempt += 1
+            print(string.format("Not hopped, retry for hop (attempt: %d)", retryAttempt))
+            task.wait(3)
         else
-            task.wait(0.1)
+            retryAttempt = 0
+            task.wait(0.05)
         end
     end
+    task.wait(0.05)
 end
