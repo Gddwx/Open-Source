@@ -1,0 +1,530 @@
+--[[ By ChatGPT, DeepSeek, Gemini, Grook ]]--
+-- v 0.1.00.01 Beta
+
+-- Obfuscator generator for Lua/LuaU (developed for Roblox LocalScript use-cases)
+-- RUN ON LOCAL MACHINE (not inside Roblox). Usage:
+--   lua ultimate_obf.lua payload.txt
+-- payload.txt should contain:
+-- [[
+--   -- your main script here (use long bracket)
+-- ]]
+-- [[
+--   -- your key here (any string, will be hashed to multi-byte key)
+-- ]]
+-- Then config lines (examples):
+-- JumperLoad = 0
+-- howmuchObfuscate = 2
+-- EnableControlFlowFlattening = true
+-- StringEncryptionMode = "heavy"
+-- UseVMProtection = false
+-- InjectJunkCode = true
+-- RandomizerFunction = true
+-- RandomizerVariable = true
+-- RandomString = true
+-- RandomAll = true
+-- Lowlatency = false
+-- The generator prints a single-line loadstring("...")() to stdout.
+
+-- ====== CONFIG DEFAULTS (can be overridden by input file) ======
+local DEFAULT_KEY_LEN = 8
+local DEFAULT_JUNK_PERCENT = 0.12
+local DEFAULT_RLE_MARKER = 0xFF
+local DEFAULT_JUNK_FUNC_COUNT = 6
+
+-- ====== READ INPUT ======
+local function read_input()
+    local fname = arg and arg[1]
+    if fname then
+        local f, err = io.open(fname, "rb")
+        if not f then error("Cannot open file: "..tostring(err)) end
+        local data = f:read("*a"); f:close()
+        return data
+    else
+        return io.read("*a") or ""
+    end
+end
+
+local raw_input = read_input()
+
+-- ====== PARSE INPUT BLOCKS ======
+-- Expect: first long bracket = main script, second long bracket = key, then config lines (key=value)
+local function extract_long_brackets(s)
+    local blocks = {}
+    local pos = 1
+    while true do
+        local a,b = s:find("%[%[", pos, true)
+        if not a then break end
+        local c,d = s:find("%]%]", b+1, true)
+        if not c then break end
+        blocks[#blocks+1] = s:sub(b+1, c-1)
+        pos = d+1
+    end
+    return blocks, s
+end
+
+local blocks = extract_long_brackets(raw_input)
+-- blocks[1] = script, blocks[2] = key (if provided)
+local MAIN_SCRIPT = (blocks[1] or "") 
+local KEY_INPUT   = (blocks[2] or "")
+
+-- read config lines after second bracket region (or anywhere)
+local config = {
+    JumperLoad = 0,
+    howmuchObfuscate = 1,
+    EnableControlFlowFlattening = true,
+    StringEncryptionMode = "heavy",
+    UseVMProtection = false,
+    InjectJunkCode = true,
+    RandomizerFunction = true,
+    RandomizerVariable = true,
+    RandomString = true,
+    RandomAll = false,
+    Lowlatency = false,
+    KeyLength = DEFAULT_KEY_LEN,
+    JunkPercent = DEFAULT_JUNK_PERCENT,
+    RLEMarker = DEFAULT_RLE_MARKER,
+    JunkFuncCount = DEFAULT_JUNK_FUNC_COUNT,
+}
+
+-- parse key=value lines
+for line in raw_input:gmatch("[^\r\n]+") do
+    local k,v = line:match("^%s*([%w_]+)%s*=%s*(.+)%s*$")
+    if k and v then
+        -- try convert booleans/numbers/strings
+        if v == "true" then config[k] = true
+        elseif v == "false" then config[k] = false
+        elseif tonumber(v) then config[k] = tonumber(v)
+        else
+            -- trim quotes if present
+            v = v:gsub('^"', ''):gsub('"$', ''):gsub("^'", ""):gsub("'$", "")
+            config[k] = v
+        end
+    end
+end
+
+-- override if user passed KeyLength or JunkPercent as specific variables
+config.KeyLength = config.KeyLength or DEFAULT_KEY_LEN
+config.JunkPercent = config.JunkPercent or DEFAULT_JUNK_PERCENT
+config.RLEMarker = config.RLEMarker or DEFAULT_RLE_MARKER
+config.JunkFuncCount = config.JunkFuncCount or DEFAULT_JUNK_FUNC_COUNT
+
+-- ====== UTILITIES ======
+local hex_digits = "0123456789abcdef"
+local function byte_to_hex(b)
+    local hi = math.floor(b/16); local lo = b % 16
+    return hex_digits:sub(hi+1,hi+1) .. hex_digits:sub(lo+1,lo+1)
+end
+local function bytes_to_hex(bytes)
+    local t = {}
+    for i=1,#bytes do t[#t+1] = byte_to_hex(bytes[i]) end
+    return table.concat(t)
+end
+local function str_to_bytes(s)
+    local t = {}
+    for i=1,#s do t[#t+1] = string.byte(s,i) end
+    return t
+end
+local function bytes_to_str(bytes)
+    local t = {}
+    for i=1,#bytes do t[#t+1] = string.char(bytes[i]) end
+    return table.concat(t)
+end
+
+local bxor = (bit32 and bit32.bxor) or (bit and bit.bxor) or nil
+local function bxor_fallback(a,b)
+    local r=0; local bv=1
+    for z=1,8 do
+        local aa = a % 2; a = math.floor(a/2)
+        local bb = b % 2; b = math.floor(b/2)
+        local rr = (aa + bb) % 2
+        r = r + rr * bv; bv = bv * 2
+    end
+    return r
+end
+local function xor_byte(a,b)
+    if bxor then return bxor(a,b) end
+    return bxor_fallback(a,b)
+end
+
+local function rand_nonzero()
+    local v = math.random(1,255)
+    if v == 0 then v = 1 end
+    return v
+end
+
+local function mkname(len)
+    local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    local out = {}
+    for i=1,len do out[#out+1] = chars:sub(math.random(1,#chars), math.random(1,#chars)) end
+    return table.concat(out)
+end
+
+-- simple integer hash of key string into N bytes
+local function key_from_string(keystr, n)
+    local out = {}
+    local h = 2166136261 -- FNV-1a-ish
+    for i=1,#keystr do
+        h = ((h ~ string.byte(keystr,i)) * 16777619) & 0xFFFFFFFF
+    end
+    -- expand h into n bytes by PRNG seeded with h
+    local seed = (h % 2147483647) + 1
+    math.randomseed(seed)
+    for i=1,n do out[#out+1] = rand_nonzero() end
+    -- reseed randomness back a bit
+    math.random(); math.random()
+    return out
+end
+
+-- ====== CODE TRANSFORMATIONS ======
+
+-- naive renaming: rename local declarations and usages (best-effort)
+local function rename_locals(code, name_len)
+    if not config.RandomizerVariable and not config.RandomizerFunction and not config.RandomAll then return code end
+    local names = {}
+    code = code:gsub("([%s;{%(,])local%s+([%a_][%w_]*)", function(pre, id)
+        local new = names[id] or mkname(name_len or 6)
+        names[id] = new
+        return pre .. "local " .. new
+    end)
+    -- also handle "function id(" top-level
+    code = code:gsub("function%s+([%a_][%w_]*)%s*%(", function(id)
+        if not names[id] and (config.RandomizerFunction or config.RandomAll) then names[id] = mkname(6) end
+        return "function " .. (names[id] or id) .. "("
+    end)
+    -- replace occurrences naively
+    for old,new in pairs(names) do
+        -- word boundaries
+        code = code:gsub("([^%w_])"..old.."([^%w_])", "%1"..new.."%2")
+        code = code:gsub("^"..old.."([^%w_])", new.."%1")
+        code = code:gsub("([^%w_])"..old.."$", "%1"..new)
+    end
+    return code
+end
+
+-- constant obfuscation (integers -> simple expressions)
+local function obf_constant_number(n)
+    if type(n) ~= "number" or n ~= math.floor(n) then return tostring(n) end
+    local a = math.random(2,9)
+    local b = math.floor(n / a)
+    local rem = n - a * b
+    if rem == 0 then return "("..a.."*"..b..")" end
+    if rem > 0 then return "("..a.."*"..b.."+"..rem..")" end
+    return "("..a.."*"..b..rem..")"
+end
+local function obfuscate_constants(code)
+    if config.Lowlatency then return code end
+    code = code:gsub("([^%w_%-%.])([%-]?%d+)([^%w_%-%.])", function(a,num,b)
+        local n = tonumber(num)
+        if not n then return a..num..b end
+        return a .. obf_constant_number(n) .. b
+    end)
+    return code
+end
+
+-- collect strings and replace with placeholders; return transformed code + decrypt table snippet
+local function collect_and_encrypt_strings(code, keybytes)
+    if config.StringEncryptionMode == "none" then return code, "" end
+    local strings = {}
+    code = code:gsub('"(.-)"', function(s)
+        if not config.RandomString and config.StringEncryptionMode ~= "heavy" then return '"'..s..'"' end
+        strings[#strings+1] = s
+        return "__STR("..#strings..")"
+    end)
+    code = code:gsub("'(.-)'", function(s)
+        if not config.RandomString and config.StringEncryptionMode ~= "heavy" then return "'"..s.."'" end
+        strings[#strings+1] = s
+        return "__STR("..#strings..")"
+    end)
+    local enc_tbl = {}
+    for i,s in ipairs(strings) do
+        local b = str_to_bytes(s)
+        local enc = {}
+        for j=1,#b do enc[#enc+1] = xor_byte(b[j], keybytes[((j-1) % #keybytes) + 1]) end
+        enc_tbl[#enc_tbl+1] = "{"..table.concat(enc, ",").."}"
+    end
+    local decl = ""
+    if #enc_tbl > 0 then
+        decl = "local __STRS = {"..table.concat(enc_tbl, ",").."}\nlocal function __STR(i) local arr=__STRS[i]; local t={}; for z=1,#arr do t[z]=string.char(arr[z]) end; return table.concat(t) end\n"
+    end
+    return code, decl
+end
+
+-- simple control flow flatten for a block (avoid transforming return lines)
+local function flatten_block(block)
+    if not config.EnableControlFlowFlattening then return block end
+    local lines = {}
+    for ln in block:gmatch("([^\n]*)\n?") do
+        if ln and ln:match("%S") then lines[#lines+1] = ln end
+    end
+    if #lines == 0 then return block end
+    local id = math.random(100000,999999)
+    local tname = "__FL"..id
+    local parts = {}
+    parts[#parts+1] = "local "..tname.." = {}"
+    for i,ln in ipairs(lines) do
+        if ln:match("^%s*return") then
+            parts[#parts+1] = ln
+        else
+            parts[#parts+1] = tname.."["..i.."] = function()\n "..ln.." \n end"
+        end
+    end
+    parts[#parts+1] = "local __ip"..id.." = 1 while __ip"..id.." <= "..#lines.." do if "..tname.."[__ip"..id.."] then "..tname.."[__ip"..id.."]() end; __ip"..id.." = __ip"..id.." + 1 end"
+    return table.concat(parts, "\n")
+end
+
+-- RLE compress bytes
+local function rle_compress_bytes(bytes, marker)
+    marker = marker or config.RLEMarker
+    local out = {}
+    local i = 1
+    while i <= #bytes do
+        local j = i
+        while j+1 <= #bytes and bytes[j+1] == bytes[i] do j = j + 1 end
+        local run = j - i + 1
+        if run >= 4 then
+            local left = run
+            while left > 0 do
+                local take = math.min(left,255)
+                out[#out+1] = marker
+                out[#out+1] = take
+                out[#out+1] = bytes[i]
+                left = left - take
+            end
+        else
+            for k=i,j do out[#out+1] = bytes[k] end
+        end
+        i = j + 1
+    end
+    return out
+end
+
+-- insert junk bytes (returns new array and sorted map indices)
+local function insert_junk(bytes, junk_percent)
+    if junk_percent <= 0 then return bytes, {} end
+    local res = {}
+    for i=1,#bytes do res[#res+1] = bytes[i] end
+    local total = #res
+    local num_junk = math.floor(total * junk_percent + 0.5)
+    local map = {}
+    for j=1,num_junk do
+        local pos = math.random(1, #res+1)
+        local junk = math.random(1,255)
+        table.insert(res, pos, junk)
+        table.insert(map, pos)
+    end
+    table.sort(map)
+    return res, map
+end
+
+-- add junk source-level code
+local function make_junk_code(count)
+    if not config.InjectJunkCode then return "" end
+    local parts = {}
+    for i=1,count do
+        local fname = mkname(6)
+        parts[#parts+1] = ("local function %s() local _a=%d; if _a==%d then return false end end"):format(fname, math.random(1,9999), math.random(10000,99999))
+        parts[#parts+1] = ("if false then %s() end"):format(fname)
+    end
+    return table.concat(parts, "\n")
+end
+
+-- prepare chunk: transform, encrypt strings, compress, xor, junk-pad
+local function prepare_chunk(src_text, keybytes)
+    -- 1) flatten sensitive markers in src_text (we assume top-level block provided)
+    src_text = flatten_block(src_text)
+    -- 2) obfuscate constants and rename locals if enabled
+    src_text = obfuscate_constants(src_text)
+    if config.RandomizerVariable or config.RandomAll or config.RandomizerFunction then
+        src_text = rename_locals(src_text, 6)
+    end
+    -- 3) collect and encrypt strings
+    local text_w_places, decrypt_decl = collect_and_encrypt_strings(src_text, keybytes)
+    -- 4) inject source-level junk
+    local junk_src = make_junk_code(config.JunkFuncCount or DEFAULT_JUNK_FUNC_COUNT)
+    local final_src = decrypt_decl .. junk_src .. "\n" .. text_w_places
+    -- 5) bytes -> compress
+    local bytes = str_to_bytes(final_src)
+    local comp = rle_compress_bytes(bytes, config.RLEMarker)
+    -- 6) XOR with key
+    local xored = {}
+    for i=1,#comp do
+        local k = keybytes[((i-1) % #keybytes) + 1]
+        xored[#xored+1] = xor_byte(comp[i], k)
+    end
+    -- 7) insert junk bytes and get map
+    local with_junk, map = insert_junk(xored, config.JunkPercent or DEFAULT_JUNK_PERCENT)
+    -- 8) hex encode
+    local enc_hex = bytes_to_hex(with_junk)
+    return {enc = enc_hex, key = keybytes, map = map}
+end
+
+-- process entire script: split into segments based on your triple markers
+local function split_by_user_markers(src)
+    local segments = {}
+    local i = 1; local n = #src
+    while i <= n do
+        local s1,e1 = src:find("%[%[%[%s*STARTWITHOUTOBFUSC%s*%]%]%]", i)
+        local s2,e2 = src:find("%[%[%[%s*STARTSENSITIVE%s*%]%]%]", i)
+        local s,e,kind
+        if s1 and s2 then
+            if s1 < s2 then s,e,kind = s1,e1,"without" else s,e,kind = s2,e2,"sensitive" end
+        else
+            if s1 then s,e,kind = s1,e1,"without" end
+            if s2 then s,e,kind = s2,e2,"sensitive" end
+        end
+        if not s then
+            segments[#segments+1] = {type="enc", text = src:sub(i)}
+            break
+        end
+        if s > i then segments[#segments+1] = {type="enc", text = src:sub(i, s-1)} end
+        if kind == "without" then
+            local se,ee = src:find("%[%[%[%s*ENDWITHOUTOBFUSC%s*%]%]%]", e+1)
+            if not se then
+                segments[#segments+1] = {type="plain", text = src:sub(e+1)}
+                break
+            else
+                segments[#segments+1] = {type="plain", text = src:sub(e+1, se-1)}
+                i = ee + 1
+            end
+        else
+            local se,ee = src:find("%[%[%[%s*ENDSENSITIVE%s*%]%]%]", e+1)
+            if not se then
+                segments[#segments+1] = {type="sensitive", text = src:sub(e+1)}
+                break
+            else
+                segments[#segments+1] = {type="sensitive", text = src:sub(e+1, se-1)}
+                i = ee + 1
+            end
+        end
+    end
+    return segments
+end
+
+-- build loader that will decode per-chunk and assemble final src then execute
+local function build_loader(chunks_seq)
+    local enc_tbl = {}
+    local key_tbl = {}
+    local map_tbl = {}
+    for i=1,#chunks_seq do
+        enc_tbl[i] = string.format("%q", chunks_seq[i].enc)
+        key_tbl[i] = "{"..table.concat(chunks_seq[i].key, ",").."}"
+        if #chunks_seq[i].map == 0 then map_tbl[i] = "{}" else map_tbl[i] = "{"..table.concat(chunks_seq[i].map, ",").."}" end
+    end
+
+    -- compact loader text (robust: checks bxor, loadstring)
+    local loader_parts = {}
+    loader_parts[#loader_parts+1] = "local enc_tbl = {"..table.concat(enc_tbl, ",").."}"
+    loader_parts[#loader_parts+1] = "local key_tbl = {"..table.concat(key_tbl, ",").."}"
+    loader_parts[#loader_parts+1] = "local map_tbl = {"..table.concat(map_tbl, ",").."}"
+    loader_parts[#loader_parts+1] = "local function hx(s,i) return tonumber(s:sub(i,i+1),16) end"
+    loader_parts[#loader_parts+1] = "local bx=(bit32 and bit32.bxor) or (bit and bit.bxor) or nil"
+    loader_parts[#loader_parts+1] = "local function x(a,b) if bx then return bx(a,b) end local r=0; local bv=1; for z=1,8 do local aa=a%2; a=math.floor(a/2); local bb=b%2; b=math.floor(b/2); local rr=(aa+bb)%2; r=r+rr*bv; bv=bv*2 end return r end"
+    loader_parts[#loader_parts+1] = [[
+local function decode_chunk(enc_hex, key, map)
+  local raw={}
+  for i=1,#enc_hex,2 do raw[#raw+1]=hx(enc_hex,i) end
+  if #map>0 then local clean={}; local mi=1; for i=1,#raw do if mi<=#map and i==map[mi] then mi=mi+1 else clean[#clean+1]=raw[i] end end; raw=clean end
+  for i=1,#raw do raw[i]=x(raw[i], key[((i-1)%#key)+1]) end
+  local out={}; local i=1
+  while i<=#raw do local v=raw[i]
+    if v==]]..tostring(config.RLEMarker)..[[ then local cnt=raw[i+1] or 0; local val=raw[i+2] or 0; for z=1,cnt do out[#out+1]=string.char(val) end; i=i+3
+    else out[#out+1]=string.char(v); i=i+1 end
+  end
+  return table.concat(out)
+end
+]]
+    loader_parts[#loader_parts+1] = "local parts = {}"
+    for i,v in ipairs(chunks_seq) do
+        if v.type == "plain" then
+            loader_parts[#loader_parts+1] = ("parts[#parts+1] = %q"):format(v.text)
+        else
+            loader_parts[#loader_parts+1] = ("parts[#parts+1] = decode_chunk(enc_tbl[%d], key_tbl[%d], map_tbl[%d])"):format(i, i, i)
+        end
+    end
+
+    loader_parts[#loader_parts+1] = [[
+local src = table.concat(parts)
+-- QUICK VM HANDLER: if contains _VMBLOCK_START, execute inner lines then continue
+local function handle_vm_and_run(s)
+ local vmstart, vms = s:find('_VMBLOCK_START')
+ if not vmstart then local fn = loadstring or load; if fn then local ok,err=pcall(function() fn(s)() end); if not ok then error('payload exec error:'..tostring(err)) end else error('no load available') end; return end
+ -- reconstruct by executing each VM block lines (best-effort)
+ local out = {}; local pos = 1
+ while true do
+  local st,en = s:find('_VMBLOCK_START', pos, true)
+  if not st then out[#out+1] = s:sub(pos); break end
+  out[#out+1] = s:sub(pos, st-1)
+  local st2 = s:find('_VMBLOCK_END', en+1, true)
+  if not st2 then error('unmatched vm block') end
+  local inner = s:sub(en+1, st2-1)
+  for line in inner:gmatch('([^\n]+)') do
+    if line:match('^%s*$') then else local fn = loadstring or load; if fn then local ok,err = pcall(function() fn(line)() end) if not ok then -- ignore vm line errors silently end end end
+  end
+  pos = st2 + 1
+ end
+ local final_src = table.concat(out)
+ local fn2 = loadstring or load
+ if fn2 then local ok,err = pcall(function() fn2(final_src)() end); if not ok then error('payload exec error:'..tostring(err)) end else error('no load available') end
+end
+handle_vm_and_run(src)
+]]
+
+    return table.concat(loader_parts, "\n")
+end
+
+-- ===== main orchestration =====
+-- build key bytes from KEY_INPUT (user-supplied key string) or random
+local keylen = tonumber(config.KeyLength) or DEFAULT_KEY_LEN
+local master_key = (#KEY_INPUT > 0) and key_from_string(KEY_INPUT, keylen) or (function() local t={}; for i=1,keylen do t[#t+1]=rand_nonzero() end; return t end)()
+
+-- split into segments by user markers
+local segments_raw = split_by_user_markers(MAIN_SCRIPT)
+-- we will produce chunk entries in same order with type plain/chunk
+local chunks_seq = {}
+
+-- iterate segments: plain segments -> include as plain, enc/sensitive -> prepare chunk(s)
+for _,seg in ipairs(segments_raw) do
+    if seg.type == "plain" then
+        chunks_seq[#chunks_seq+1] = {type="plain", text = seg.text}
+    else
+        -- we support "howmuchObfuscate" passes: reapply transformations multiple times (for stronger obf)
+        local passes = math.max(1, math.floor(tonumber(config.howmuchObfuscate or 1)))
+        local cur_text = seg.text
+        local last_chunk = nil
+        for p=1,passes do
+            -- each pass use derived key (rotate master_key with p)
+            local keybytes = {}
+            for i=1,#master_key do keybytes[i] = master_key[((i + p - 2) % #master_key) + 1] end
+            -- for sensitive blocks: optional VM light wrapping
+            if seg.type == "sensitive" and config.UseVMProtection then
+                -- convert lines to VM wrapper markers
+                local vmblock = "_VMBLOCK_START\n"
+                for ln in cur_text:gmatch("([^\n]*)\n?") do if ln:match("%S") then vmblock = vmblock .. ln .. "\n" end end
+                vmblock = vmblock .. "_VMBLOCK_END\n"
+                cur_text = vmblock
+            end
+            -- prepare chunk
+            local chunk = prepare_chunk(cur_text, keybytes)
+            chunk.type = "chunk"
+            -- store chunk in sequence
+            chunks_seq[#chunks_seq+1] = chunk
+            last_chunk = chunk
+            -- for next pass, feed the decoded (simulated) content as text (makes multi-layer)
+            -- but we don't decode here; we simulate by wrapping current chunk in a marker that will be decoded in runtime
+            cur_text = "--REWRAP_PASS_MARKER\n"
+        end
+    end
+end
+
+-- build loader
+local loader = build_loader(chunks_seq)
+-- escape loader into \NNN decimal escapes
+local esc_parts = {}
+for i=1,#loader do esc_parts[#esc_parts+1] = "\\" .. tostring(string.byte(loader,i)) end
+local esc_loader = table.concat(esc_parts)
+local final_output = 'loadstring("' .. esc_loader .. '")()'
+
+-- print one-line final output
+io.write(final_output)
+
+-- End of generator
