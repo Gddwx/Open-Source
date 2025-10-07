@@ -1,0 +1,348 @@
+-- luau_obfuscator_protected.lua
+-- By ChatGPT
+-- v 0.01.00.01
+-- Luau obfuscator with user-provided PROTECTED & KEYWORDS
+-- Usage: lua luau_obfuscator_protected.lua > out.lua
+-- Edit MAIN_SCRIPT below.
+
+local OPT = {
+  minify = true,
+  rename_locals = true,
+  obfuscate_strings = true,
+  insert_junk = true,
+  output_single_line = true,
+  seed = 9999,
+  max_junk_per_block = 2,
+}
+
+-- ==========================
+local MAIN_SCRIPT = [[
+-- Paste Here
+-- example:
+local function greet(name)
+  local msg = "Hi, World!"
+  print(msg .. " " .. name)
+end
+
+local x = 5
+greet("ChatGPT")
+]]
+-- ==========================
+
+-- === PROTECTED (menggunakan daftar yang kamu kirim) ===
+local PROTECTED = {
+    -- Roblox API Services
+    ["game"] = 1, ["workspace"] = 1, ["Players"] = 1, ["Lighting"] = 1,
+    ["ReplicatedStorage"] = 1, ["ServerScriptService"] = 1, ["ServerStorage"] = 1,
+    ["StarterPack"] = 1, ["StarterGui"] = 1, ["StarterPlayer"] = 1,
+    ["StarterPlayerScripts"] = 1, ["StarterCharacterScripts"] = 1,
+    ["RunService"] = 1, ["UserInputService"] = 1, ["TweenService"] = 1,
+    ["HttpService"] = 1, ["MarketplaceService"] = 1, ["PathfindingService"] = 1,
+    ["SoundService"] = 1, ["Chat"] = 1, ["Teams"] = 1, ["GroupService"] = 1,
+    ["MessagingService"] = 1, ["DataStoreService"] = 1, ["AnalyticsService"] = 1,
+
+    -- Roblox Classes
+    ["Instance"] = 1, ["Part"] = 1, ["BasePart"] = 1, ["Model"] = 1,
+    ["Humanoid"] = 1, ["Script"] = 1, ["LocalScript"] = 1, ["ModuleScript"] = 1,
+    ["Folder"] = 1, ["BillboardGui"] = 1, ["ScreenGui"] = 1, ["SurfaceGui"] = 1,
+    ["TextButton"] = 1, ["TextLabel"] = 1, ["Frame"] = 1, ["ImageButton"] = 1,
+    ["Camera"] = 1, ["Tool"] = 1, ["Decal"] = 1, ["Texture"] = 1,
+    ["SpecialMesh"] = 1, ["BlockMesh"] = 1, ["CylinderMesh"] = 1,
+    ["Motor6D"] = 1, ["Motor"] = 1, ["Weld"] = 1, ["Snap"] = 1,
+    ["BodyPosition"] = 1, ["BodyVelocity"] = 1, ["BodyGyro"] = 1,
+    ["RocketPropulsion"] = 1, ["Fire"] = 1, ["Smoke"] = 1, ["Sparkles"] = 1,
+    ["ParticleEmitter"] = 1, ["Explosion"] = 1, ["Sound"] = 1,
+    ["RemoteEvent"] = 1, ["RemoteFunction"] = 1, ["BindableEvent"] = 1,
+    ["BindableFunction"] = 1, ["NumberValue"] = 1, ["StringValue"] = 1,
+    ["BoolValue"] = 1, ["ObjectValue"] = 1, ["CFrameValue"] = 1,
+    ["Color3Value"] = 1, ["BrickColorValue"] = 1, ["Vector3Value"] = 1,
+    ["IntValue"] = 1, ["RayValue"] = 1, ["PhysicalProperties"] = 1,
+
+    -- Luau Standard Libraries
+    ["table"] = 1, ["string"] = 1, ["math"] = 1, ["os"] = 1, ["debug"] = 1,
+    ["bit32"] = 1, ["coroutine"] = 1, ["utf8"] = 1,
+
+    -- Roblox Data Types
+    ["Vector2"] = 1, ["Vector3"] = 1, ["CFrame"] = 1, ["UDim2"] = 1,
+    ["UDim"] = 1, ["BrickColor"] = 1, ["Color3"] = 1, ["ColorSequence"] = 1,
+    ["NumberSequence"] = 1, ["Rect"] = 1, ["Region3"] = 1, ["Faces"] = 1,
+    ["Axes"] = 1, ["Enum"] = 1, ["EnumItem"] = 1, ["Font"] = 1,
+    ["NumberRange"] = 1, ["PhysicalProperties"] = 1, ["Ray"] = 1,
+    ["TweenInfo"] = 1, ["DateTime"] = 1,
+
+    -- Essential Functions
+    ["require"] = 1, ["print"] = 1, ["warn"] = 1, ["error"] = 1,
+    ["assert"] = 1, ["type"] = 1, ["typeof"] = 1, ["tostring"] = 1,
+    ["tonumber"] = 1, ["rawget"] = 1, ["rawset"] = 1, ["rawequal"] = 1,
+    ["getmetatable"] = 1, ["setmetatable"] = 1, ["ipairs"] = 1,
+    ["pairs"] = 1, ["next"] = 1, ["select"] = 1, ["pcall"] = 1,
+    ["xpcall"] = 1, ["coroutine"] = 1, ["task"] = 1, ["spawn"] = 1,
+    ["delay"] = 1, ["wait"] = 1, ["tick"] = 1, ["time"] = 1,
+    ["os.time"] = 1, ["os.date"] = 1, ["os.clock"] = 1,
+
+    -- Memory/Environment Functions
+    ["getfenv"] = 1, ["setfenv"] = 1, ["getgenv"] = 1, ["getreg"] = 1,
+    ["getrenv"] = 1, ["getgc"] = 1, ["getinstances"] = 1,
+    ["getloadedmodules"] = 1, ["getconnections"] = 1, ["getcustomasset"] = 1,
+
+    -- Exploit-Specific (Umum)
+    ["syn"] = 1, ["crypt"] = 1, ["secure_load"] = 1, ["iswindowactive"] = 1,
+    ["request"] = 1, ["queue_on_teleport"] = 1, ["setclipboard"] = 1,
+    ["getscripts"] = 1, ["getnil"] = 1, ["getidentity"] = 1,
+    ["setidentity"] = 1, ["checkcaller"] = 1, ["hookfunction"] = 1,
+    ["hookmetamethod"] = 1, ["newcclosure"] = 1, ["clonefunction"] = 1,
+    ["setreadonly"] = 1, ["makewriteable"] = 1, ["firesignal"] = 1,
+    ["getrawmetatable"] = 1, ["setrawmetatable"] = 1,
+
+    -- Delta Executor
+    ["delta"] = 1, ["get_hidden_gui"] = 1, ["get_hidden_interface"] = 1,
+
+    -- Synapse X
+    ["syn"] = 1, ["crypt"] = 1, ["syn.request"] = 1, ["protect_gui"] = 1,
+    ["is_protosmasher_caller"] = 1, ["get_thread_identity"] = 1,
+
+    -- Krnl
+    ["krnl"] = 1, ["Krnl"] = 1, ["identifyexecutor"] = 1,
+
+    -- Oxygen U
+    ["oxygen"] = 1, ["Oxygen"] = 1,
+
+    -- Script-Ware
+    ["scriptware"] = 1, ["SW"] = 1,
+
+    -- Fluxus
+    ["fluxus"] = 1, ["flux"] = 1,
+
+    -- Eksploit Lain
+    ["prox"] = 1, ["trident"] = 1, ["elysian"] = 1, ["celery"] = 1,
+    ["comet"] = 1, ["sentinel"] = 1, ["scripten"] = 1, ["hydrogen"] = 1,
+    ["neon"] = 1, ["arkanus"] = 1, ["codex"] = 1, ["fate"] = 1,
+    ["valyse"] = 1, ["nezur"] = 1,
+
+    -- Utility Umum
+    ["loadstring"] = 1, ["load"] = 1, ["clone"] = 1, ["cloneref"] = 1,
+    ["Instance.new"] = 1, ["FindFirstChild"] = 1, ["WaitForChild"] = 1,
+    ["GetChildren"] = 1, ["GetDescendants"] = 1, ["IsA"] = 1,
+    ["Destroy"] = 1, ["ClearAllChildren"] = 1, ["GetService"] = 1,
+    ["GetPlayers"] = 1, ["GetUserId"] = 1, ["Kick"] = 1, ["Clone"] = 1,
+
+    -- Variabel Global
+    ["_G"] = 1, ["shared"] = 1, ["script"] = 1, ["plugin"] = 1,
+    ["__index"] = 1, ["__newindex"] = 1, ["__namecall"] = 1,
+    ["__metatable"] = 1, ["__tostring"] = 1, ["__eq"] = 1,
+
+    -- HTTP/Network
+    ["http_request"] = 1, ["request"] = 1, ["HttpGet"] = 1,
+    ["HttpPost"] = 1, ["game.HttpGet"] = 1, ["game.HttpPost"] = 1,
+
+    -- Drawing/Visual
+    ["Drawing"] = 1, ["new"] = 1, ["Color3.fromRGB"] = 1,
+    ["Vector2.new"] = 1, ["Instance.new"] = 1
+}
+
+-- === KEYWORDS (menggunakan daftar yang kamu kirim) ===
+local KEYWORDS = {
+    -- Lua/Luau Keywords
+    ["and"] = 1, ["break"] = 1, ["do"] = 1, ["else"] = 1,
+    ["elseif"] = 1, ["end"] = 1, ["false"] = 1, ["for"] = 1,
+    ["function"] = 1, ["goto"] = 1, ["if"] = 1, ["in"] = 1,
+    ["local"] = 1, ["nil"] = 1, ["not"] = 1, ["or"] = 1,
+    ["repeat"] = 1, ["return"] = 1, ["then"] = 1, ["true"] = 1,
+    ["until"] = 1, ["while"] = 1,
+
+    -- Tambahan Khusus Luau
+    ["type"] = 1, ["typeof"] = 1, ["continue"] = 1,
+    
+    -- Common Pattern Matching
+    ["self"] = 1, ["super"] = 1
+}
+
+-- === Implementation ===
+
+-- deterministic RNG
+local seq = OPT.seed or 1337
+local function rng()
+  seq = (1103515245 * seq + 12345) % 2^31
+  return seq / 2^31
+end
+
+local alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+local function gen_name()
+  local n = math.floor(rng() * 1e9)
+  local s = {}
+  s[1] = alpha:sub((n % #alpha) + 1, (n % #alpha) + 1)
+  n = math.floor(n / #alpha)
+  while n > 0 do
+    s[#s+1] = alpha:sub((n % #alpha) + 1, (n % #alpha) + 1)
+    n = math.floor(n / #alpha)
+  end
+  if rng() > 0.6 then s[#s+1] = tostring(math.floor(rng()*90 + 10)) end
+  return table.concat(s)
+end
+
+-- string protection helpers
+local function extract_strings(src)
+  local strings = {}
+  local id = 0
+  src = src:gsub("%[%[.-%]%]", function(s) id=id+1; strings[id]=s; return ("\0S%04d\0"):format(id) end)
+  src = src:gsub('%b""', function(s) id=id+1; strings[id]=s; return ("\0S%04d\0"):format(id) end)
+  src = src:gsub("%b''", function(s) id=id+1; strings[id]=s; return ("\0S%04d\0"):format(id) end)
+  return src, strings
+end
+local function restore_strings(src, strings)
+  for i=1,#strings do src = src:gsub(("\0S%04d\0"):format(i), strings[i], 1) end
+  return src
+end
+
+local function strip_comments(src)
+  local s, strs = extract_strings(src)
+  s = s:gsub("%-%-%[%[.-%]%]", "")
+  s = s:gsub("%-%-.-\n", "\n")
+  s = restore_strings(s, strs)
+  return s
+end
+
+local function minify(src)
+  local s, strs = extract_strings(src)
+  s = s:gsub("%s+", " ")
+  s = s:gsub("%s*([=+%-%*/%%%^<>~#%(%){},%;:])%s*", "%1")
+  s = s:gsub("^%s+", ""):gsub("%s+$", "")
+  s = restore_strings(s, strs)
+  return s
+end
+
+local function collect_locals(src)
+  local declared = {}
+  for name in src:gmatch("local%s+function%s+([%a_][%w_]*)") do
+    if not PROTECTED[name] and not KEYWORDS[name] then declared[name]=true end
+  end
+  for decl in src:gmatch("local%s+([^\n;]+)") do
+    for name in decl:gmatch("([%a_][%w_]*)") do
+      if not PROTECTED[name] and not KEYWORDS[name] then declared[name]=true end
+    end
+  end
+  for name in src:gmatch("function%s+([%a_][%w_]*)%s*%(") do
+    if not name:find("%.") and not name:find(":") and not PROTECTED[name] and not KEYWORDS[name] then
+      declared[name]=true
+    end
+  end
+  return declared
+end
+
+local function rename_locals_in_src(src, map)
+  local s, strs = extract_strings(src)
+  local keys = {}
+  for k in pairs(map) do keys[#keys+1]=k end
+  table.sort(keys, function(a,b) return #a>#b end)
+  for _,orig in ipairs(keys) do
+    local obf = map[orig]
+    s = s:gsub("(%f[%a_]"..orig.."%f[^%w_])", obf)
+  end
+  s = restore_strings(s, strs)
+  return s
+end
+
+local function apply_renaming(src)
+  local declared = collect_locals(src)
+  local map = {}
+  for name in pairs(declared) do map[name] = gen_name() end
+  if next(map) == nil then return src, map end
+  local out = rename_locals_in_src(src, map)
+  return out, map
+end
+
+-- string -> string.char(...) expression
+local function string_to_char_expr_literal(lit)
+  local inner = lit
+  if inner:sub(1,2) == "[[" and inner:sub(-2) == "]]" then inner = inner:sub(3,-3)
+  else inner = inner:sub(2,-2) end
+  if inner == "" then return '""' end
+  local bytes = {}
+  for i=1,#inner do bytes[#bytes+1] = tostring(inner:byte(i)) end
+  -- chunk into parts for safety
+  local parts = {}
+  local max_chunk = 120
+  local i=1
+  while i <= #bytes do
+    local j = math.min(#bytes, i + max_chunk - 1)
+    parts[#parts+1] = "string.char(" .. table.concat(bytes, ",", i, j) .. ")"
+    i = j + 1
+  end
+  if #parts == 1 then return parts[1] end
+  return table.concat(parts, " .. ")
+end
+
+local function obfuscate_strings_in_src(src)
+  local s, strs = extract_strings(src)
+  for i=1,#strs do
+    local lit = strs[i]  -- includes quotes/brackets
+    local expr = string_to_char_expr_literal(lit)
+    s = s:gsub(("\0S%04d\0"):format(i), expr)
+  end
+  return s
+end
+
+-- make junk
+local junk_counter = 0
+local function make_junk_block()
+  local parts = {}
+  local n = math.max(1, math.floor(rng() * OPT.max_junk_per_block))
+  for i=1,n do
+    junk_counter = junk_counter + 1
+    local vn = "_" .. gen_name()
+    local fn = "_" .. gen_name()
+    parts[#parts+1] = ("local %s = %d + %d"):format(vn, math.floor(rng()*1000), math.floor(rng()*1000))
+    parts[#parts+1] = ("local function %s() local a=%d; local b=%d; return (a*b)%d end"):format(fn, math.floor(rng()*50), math.floor(rng()*50), math.floor(rng()*97+1))
+    parts[#parts+1] = ("local _ = %s()"):format(fn)
+  end
+  return table.concat(parts, ";")
+end
+
+local function insert_junk_between(src)
+  if not OPT.insert_junk then return src end
+  local lines = {}
+  for line in src:gmatch("([^\n]*)\n?") do lines[#lines+1] = line end
+  local out = {}
+  for i=1,#lines do
+    out[#out+1] = lines[i]
+    if i%3==0 and rng()>0.4 then out[#out+1] = make_junk_block() end
+  end
+  return table.concat(out, "\n")
+end
+
+local function process(src)
+  src = src:gsub("\r\n", "\n")
+  src = strip_comments(src)
+
+  if OPT.obfuscate_strings then
+    src = obfuscate_strings_in_src(src)
+  end
+
+  if OPT.rename_locals then
+    src, _map = apply_renaming(src)
+  end
+
+  if OPT.insert_junk then
+    src = insert_junk_between(src)
+  end
+
+  if OPT.minify then
+    src = minify(src)
+  end
+
+  if OPT.output_single_line then
+    src = src:gsub("\n", " ")
+    src = src:gsub("%s+", " ")
+  end
+
+  return src
+end
+
+-- Run
+local ok, out = pcall(process, MAIN_SCRIPT)
+if not ok then
+  io.stderr:write("Error during obfuscation: "..tostring(out).."\n")
+  os.exit(1)
+end
+
+print(out)
