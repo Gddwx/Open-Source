@@ -1,0 +1,745 @@
+-- ESP Module Script v2.0
+-- By: DeepSeek AI free lol
+-- Usage: Global module for enemy highlighting in RunningGames
+
+-- ============================================
+-- CONFIGURATION SECTION
+-- ============================================
+local ESP_CONFIG = {
+    -- Performance settings
+    CHECK_INTERVAL = 0.5,         -- Update interval in seconds
+    MAX_HIGHLIGHTS = 20,          -- Maximum concurrent highlights
+    OBJECT_POOL_SIZE = 10,        -- Initial object pool size
+    
+    -- Visual settings
+    HIGHLIGHT_FILL_TRANSPARENCY = 0.35,
+    OUTLINE_COLOR = Color3.new(0, 0, 0),
+    DEPTH_MODE = Enum.HighlightDepthMode.AlwaysOnTop,
+    
+    -- Team colors
+    ENEMY_COLOR = Color3.fromRGB(255, 60, 60),     -- Red
+    ALLY_COLOR = Color3.fromRGB(0, 170, 255),      -- Blue (optional)
+    
+    -- Features toggle
+    HIGHLIGHT_ALLIES = false,     -- Set to true to highlight teammates
+    AUTO_START = true,            -- Automatically start when loaded
+    DEBUG_MODE = false            -- Enable debug logging
+}
+
+-- ============================================
+-- GLOBAL REGISTRY
+-- ============================================
+-- Create or get global ESP registry
+_G.ESPSystem = _G.ESPSystem or {
+    Modules = {},
+    Configs = {},
+    States = {},
+    Version = "2.0.1"
+}
+
+-- Register this instance
+local MODULE_ID = "MainESP_" .. tick()
+_G.ESPSystem.Modules[MODULE_ID] = {
+    Config = ESP_CONFIG,
+    State = {},
+    Callbacks = {},
+    Statistics = {
+        highlightsCreated = 0,
+        updatesPerformed = 0,
+        errorsCount = 0
+    }
+}
+
+local ESP = _G.ESPSystem.Modules[MODULE_ID]
+
+-- ============================================
+-- SERVICES & REFERENCES
+-- ============================================
+local Services = {
+    Players = game:GetService("Players"),
+    RunService = game:GetService("RunService"),
+    Workspace = game:GetService("Workspace"),
+    Stats = game:GetService("Stats"),
+    HttpService = game:GetService("HttpService")
+}
+
+local LP = Services.Players.LocalPlayer
+local RunningGames = Services.Workspace:WaitForChild("RunningGames", 10)
+
+-- ============================================
+-- UTILITY FUNCTIONS
+-- ============================================
+local Utilities = {
+    -- Safe destroy with error suppression
+    SafeDestroy = function(obj)
+        if obj and obj.Parent then
+            local success, err = pcall(function()
+                obj:Destroy()
+            end)
+            if not success and ESP_CONFIG.DEBUG_MODE then
+                warn("[ESP] Failed to destroy object:", err)
+            end
+        end
+    end,
+    
+    -- Safe disconnect for connections
+    SafeDisconnect = function(conn)
+        if conn and typeof(conn) == "RBXScriptConnection" then
+            local success, err = pcall(function()
+                conn:Disconnect()
+            end)
+            if not success and ESP_CONFIG.DEBUG_MODE then
+                warn("[ESP] Failed to disconnect:", err)
+            end
+        end
+    end,
+    
+    -- Log message with timestamp
+    Log = function(message, level)
+        level = level or "INFO"
+        local timestamp = os.date("%H:%M:%S")
+        local logMsg = string.format("[%s][ESP][%s] %s", timestamp, level, message)
+        
+        -- Output based on level
+        if level == "ERROR" then
+            warn(logMsg)
+        elseif level == "WARN" then
+            warn(logMsg)
+        elseif ESP_CONFIG.DEBUG_MODE or level == "INFO" then
+            print(logMsg)
+        end
+        
+        -- Call external logger if registered
+        if ESP.Callbacks.OnLog then
+            local success, err = pcall(function()
+                ESP.Callbacks.OnLog(message, level)
+            end)
+            if not success and ESP_CONFIG.DEBUG_MODE then
+                warn("[ESP] Logger callback failed:", err)
+            end
+        end
+        
+        return logMsg
+    end,
+    
+    -- Performance monitor
+    MeasurePerformance = function(callback, label)
+        local startTime = tick()
+        local success, result = pcall(callback)
+        local endTime = tick()
+        local duration = endTime - startTime
+        
+        if ESP_CONFIG.DEBUG_MODE then
+            Utilities.Log(string.format("%s took %.4f seconds", label or "Operation", duration), "DEBUG")
+        end
+        
+        return success, result, duration
+    end
+}
+
+-- ============================================
+-- OBJECT POOL SYSTEM
+-- ============================================
+local ObjectPool = {
+    Active = {},
+    Inactive = {},
+    TotalCreated = 0
+}
+
+function ObjectPool:Acquire()
+    -- Get from inactive pool
+    if #self.Inactive > 0 then
+        local obj = table.remove(self.Inactive)
+        self.Active[obj] = true
+        return obj
+    end
+    
+    -- Create new if pool is empty
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "AutoESP_HL_" .. self.TotalCreated
+    highlight.FillTransparency = ESP_CONFIG.HIGHLIGHT_FILL_TRANSPARENCY
+    highlight.OutlineTransparency = 0
+    highlight.OutlineColor = ESP_CONFIG.OUTLINE_COLOR
+    highlight.DepthMode = ESP_CONFIG.DEPTH_MODE
+    
+    self.TotalCreated = self.TotalCreated + 1
+    self.Active[highlight] = true
+    ESP.Statistics.highlightsCreated = ESP.Statistics.highlightsCreated + 1
+    
+    if ESP_CONFIG.DEBUG_MODE then
+        Utilities.Log(string.format("Created new highlight #%d", self.TotalCreated), "DEBUG")
+    end
+    
+    return highlight
+end
+
+function ObjectPool:Release(obj)
+    if not obj or not self.Active[obj] then return end
+    
+    -- Reset properties
+    obj.Adornee = nil
+    obj.Parent = nil
+    
+    -- Move to inactive pool
+    self.Active[obj] = nil
+    table.insert(self.Inactive, obj)
+end
+
+function ObjectPool:Cleanup()
+    for obj in pairs(self.Active) do
+        self:Release(obj)
+    end
+end
+
+function ObjectPool:GetStats()
+    return {
+        Active = table.count(self.Active),
+        Inactive = #self.Inactive,
+        Total = self.TotalCreated
+    }
+end
+
+-- ============================================
+-- PLAYER TRACKING SYSTEM
+-- ============================================
+local PlayerTracker = {
+    Highlights = {},        -- Player -> Highlight object
+    Connections = {},       -- Player -> CharacterAdded connection
+    TeamStatus = {}         -- Player -> {IsEnemy, IsAlly}
+}
+
+function PlayerTracker:Track(player, isEnemy)
+    if not player or player == LP then return end
+    
+    -- Remove existing tracking
+    self:Untrack(player)
+    
+    -- Store team status
+    self.TeamStatus[player] = {
+        IsEnemy = isEnemy,
+        IsAlly = not isEnemy,
+        LastUpdate = tick()
+    }
+    
+    -- Create highlight if character exists
+    if player.Character then
+        self:CreateHighlight(player, isEnemy)
+    end
+    
+    -- Listen for character changes
+    self.Connections[player] = player.CharacterAdded:Connect(function()
+        task.wait(0.25) -- Wait for character to fully load
+        if self.TeamStatus[player] then
+            self:CreateHighlight(player, self.TeamStatus[player].IsEnemy)
+        end
+    end)
+    
+    Utilities.Log(string.format("Tracking %s as %s", player.Name, isEnemy and "ENEMY" or "ALLY"), "INFO")
+end
+
+function PlayerTracker:CreateHighlight(player, isEnemy)
+    local character = player.Character
+    if not character then return end
+    
+    -- Clean up existing highlight
+    if self.Highlights[player] then
+        ObjectPool:Release(self.Highlights[player])
+        self.Highlights[player] = nil
+    end
+    
+    -- Check limit
+    local activeCount = ObjectPool:GetStats().Active
+    if activeCount >= ESP_CONFIG.MAX_HIGHLIGHTS then
+        Utilities.Log("Highlight limit reached, skipping " .. player.Name, "WARN")
+        return
+    end
+    
+    -- Create new highlight
+    local highlight = ObjectPool:Acquire()
+    highlight.Adornee = character
+    highlight.FillColor = isEnemy and ESP_CONFIG.ENEMY_COLOR or ESP_CONFIG.ALLY_COLOR
+    highlight.Parent = Services.Workspace
+    
+    self.Highlights[player] = highlight
+    
+    if ESP_CONFIG.DEBUG_MODE then
+        Utilities.Log(string.format("Highlight created for %s", player.Name), "DEBUG")
+    end
+end
+
+function PlayerTracker:Untrack(player)
+    if self.Highlights[player] then
+        ObjectPool:Release(self.Highlights[player])
+        self.Highlights[player] = nil
+    end
+    
+    Utilities.SafeDisconnect(self.Connections[player])
+    self.Connections[player] = nil
+    
+    self.TeamStatus[player] = nil
+end
+
+function PlayerTracker:ClearAll()
+    for player in pairs(self.Highlights) do
+        self:Untrack(player)
+    end
+    
+    table.clear(self.Highlights)
+    table.clear(self.Connections)
+    table.clear(self.TeamStatus)
+end
+
+function PlayerTracker:GetTrackedCount()
+    return {
+        Total = table.count(self.Highlights),
+        Enemies = 0,
+        Allies = 0
+    }
+end
+
+-- ============================================
+-- MATCH DETECTION SYSTEM
+-- ============================================
+local MatchDetector = {
+    CurrentMatch = nil,
+    MyTeam = nil,
+    EnemyTeam = nil,
+    LastCheck = 0,
+    Connection = nil
+}
+
+function MatchDetector:FindMyMatch()
+    if not RunningGames then
+        RunningGames = Services.Workspace:FindFirstChild("RunningGames")
+        if not RunningGames then return nil end
+    end
+    
+    local now = tick()
+    if now - self.LastCheck < 0.1 then -- Prevent spam checking
+        return self.CurrentMatch, self.MyTeam, self.EnemyTeam
+    end
+    self.LastCheck = now
+    
+    for _, match in ipairs(RunningGames:GetChildren()) do
+        local alivePlayers = match:FindFirstChild("AlivePlayers")
+        if alivePlayers then
+            local teamBlue = alivePlayers:FindFirstChild("TeamBlue")
+            local teamRed = alivePlayers:FindFirstChild("TeamRed")
+            
+            if teamBlue and teamBlue:FindFirstChild(LP.Name) then
+                return match, "TeamBlue", "TeamRed"
+            end
+            
+            if teamRed and teamRed:FindFirstChild(LP.Name) then
+                return match, "TeamRed", "TeamBlue"
+            end
+        end
+    end
+    
+    return nil
+end
+
+function MatchDetector:Update()
+    local match, myTeam, enemyTeam = self:FindMyMatch()
+    
+    -- No match found
+    if not match then
+        if self.CurrentMatch then
+            Utilities.Log("Match ended, clearing highlights", "INFO")
+            PlayerTracker:ClearAll()
+            self.CurrentMatch = nil
+            self.MyTeam = nil
+            self.EnemyTeam = nil
+        end
+        return false
+    end
+    
+    -- Match changed
+    if match ~= self.CurrentMatch then
+        Utilities.Log(string.format("New match detected! Team: %s", myTeam), "INFO")
+        
+        PlayerTracker:ClearAll()
+        
+        self.CurrentMatch = match
+        self.MyTeam = myTeam
+        self.EnemyTeam = enemyTeam
+        
+        -- Listen for match removal
+        Utilities.SafeDisconnect(self.Connection)
+        self.Connection = match.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                Utilities.Log("Match folder removed", "INFO")
+                PlayerTracker:ClearAll()
+                self.CurrentMatch = nil
+                self.MyTeam = nil
+                self.EnemyTeam = nil
+            end
+        end)
+    end
+    
+    return true
+end
+
+function MatchDetector:RefreshPlayers()
+    if not self.CurrentMatch then return end
+    
+    local alivePlayers = self.CurrentMatch:FindFirstChild("AlivePlayers")
+    if not alivePlayers then return end
+    
+    -- Track enemies
+    local enemyFolder = alivePlayers:FindFirstChild(self.EnemyTeam)
+    if enemyFolder then
+        for _, playerObj in ipairs(enemyFolder:GetChildren()) do
+            local player = Services.Players:FindFirstChild(playerObj.Name)
+            if player and player ~= LP then
+                PlayerTracker:Track(player, true)
+            end
+        end
+    end
+    
+    -- Track allies (if enabled)
+    if ESP_CONFIG.HIGHLIGHT_ALLIES then
+        local allyFolder = alivePlayers:FindFirstChild(self.MyTeam)
+        if allyFolder then
+            for _, playerObj in ipairs(allyFolder:GetChildren()) do
+                local player = Services.Players:FindFirstChild(playerObj.Name)
+                if player and player ~= LP then
+                    PlayerTracker:Track(player, false)
+                end
+            end
+        end
+    end
+    
+    -- Clean up players no longer in match
+    for player in pairs(PlayerTracker.Highlights) do
+        local shouldBeTracked = false
+        
+        -- Check if player is in enemy folder
+        if enemyFolder and enemyFolder:FindFirstChild(player.Name) then
+            shouldBeTracked = true
+        end
+        
+        -- Check if player is in ally folder (if allies are tracked)
+        if ESP_CONFIG.HIGHLIGHT_ALLIES then
+            local allyFolder = alivePlayers:FindFirstChild(self.MyTeam)
+            if allyFolder and allyFolder:FindFirstChild(player.Name) then
+                shouldBeTracked = true
+            end
+        end
+        
+        if not shouldBeTracked then
+            PlayerTracker:Untrack(player)
+        end
+    end
+end
+
+-- ============================================
+-- MAIN ESP CONTROLLER
+-- ============================================
+local ESPController = {
+    IsRunning = false,
+    HeartbeatConnection = nil,
+    PlayerRemovingConnection = nil,
+    LastUpdate = 0
+}
+
+function ESPController:Start()
+    if self.IsRunning then
+        Utilities.Log("ESP is already running", "WARN")
+        return false
+    end
+    
+    Utilities.Log("Starting ESP system...", "INFO")
+    
+    -- Initialize object pool
+    for i = 1, ESP_CONFIG.OBJECT_POOL_SIZE do
+        local highlight = ObjectPool:Acquire()
+        ObjectPool:Release(highlight)
+    end
+    
+    -- Setup update loop
+    self.HeartbeatConnection = Services.RunService.Heartbeat:Connect(function(deltaTime)
+        self.LastUpdate = self.LastUpdate + deltaTime
+        
+        if self.LastUpdate >= ESP_CONFIG.CHECK_INTERVAL then
+            self.LastUpdate = 0
+            ESP.Statistics.updatesPerformed = ESP.Statistics.updatesPerformed + 1
+            
+            local success, _ = Utilities.MeasurePerformance(function()
+                -- Update match detection
+                if MatchDetector:Update() then
+                    -- Refresh player highlights
+                    MatchDetector:RefreshPlayers()
+                end
+            end, "ESP Update")
+            
+            if not success then
+                ESP.Statistics.errorsCount = ESP.Statistics.errorsCount + 1
+            end
+        end
+    end)
+    
+    -- Listen for players leaving
+    self.PlayerRemovingConnection = Services.Players.PlayerRemoving:Connect(function(player)
+        PlayerTracker:Untrack(player)
+    end)
+    
+    self.IsRunning = true
+    Utilities.Log("ESP system started successfully", "SUCCESS")
+    
+    return true
+end
+
+function ESPController:Stop()
+    if not self.IsRunning then return end
+    
+    Utilities.Log("Stopping ESP system...", "INFO")
+    
+    -- Disconnect connections
+    Utilities.SafeDisconnect(self.HeartbeatConnection)
+    Utilities.SafeDisconnect(self.PlayerRemovingConnection)
+    Utilities.SafeDisconnect(MatchDetector.Connection)
+    
+    -- Clean up everything
+    PlayerTracker:ClearAll()
+    ObjectPool:Cleanup()
+    
+    -- Reset states
+    self.IsRunning = false
+    self.LastUpdate = 0
+    MatchDetector.CurrentMatch = nil
+    MatchDetector.MyTeam = nil
+    MatchDetector.EnemyTeam = nil
+    
+    Utilities.Log("ESP system stopped", "INFO")
+end
+
+function ESPController:Restart()
+    self:Stop()
+    task.wait(0.5)
+    return self:Start()
+end
+
+function ESPController:GetStatus()
+    local poolStats = ObjectPool:GetStats()
+    local trackedStats = PlayerTracker:GetTrackedCount()
+    
+    return {
+        Running = self.IsRunning,
+        InMatch = MatchDetector.CurrentMatch ~= nil,
+        CurrentTeam = MatchDetector.MyTeam,
+        
+        Highlights = {
+            Active = poolStats.Active,
+            Inactive = poolStats.Inactive,
+            TotalCreated = poolStats.Total
+        },
+        
+        Players = {
+            Tracked = trackedStats.Total,
+            Enemies = trackedStats.Enemies,
+            Allies = trackedStats.Allies
+        },
+        
+        Performance = {
+            Updates = ESP.Statistics.updatesPerformed,
+            Errors = ESP.Statistics.errorsCount,
+            Uptime = self.IsRunning and (tick() - ESP.State.StartTime) or 0
+        }
+    }
+end
+
+-- ============================================
+-- PUBLIC API (Global Functions)
+-- ============================================
+local PublicAPI = {}
+
+-- Main control functions
+function PublicAPI:StartESP()
+    local success, err = pcall(function()
+        return ESPController:Start()
+    end)
+    
+    if not success then
+        Utilities.Log("Failed to start ESP: " .. tostring(err), "ERROR")
+        return false, err
+    end
+    
+    return true
+end
+
+function PublicAPI:StopESP()
+    local success, err = pcall(function()
+        ESPController:Stop()
+        return true
+    end)
+    
+    if not success then
+        Utilities.Log("Failed to stop ESP: " .. tostring(err), "ERROR")
+        return false, err
+    end
+    
+    return true
+end
+
+function PublicAPI:RestartESP()
+    return ESPController:Restart()
+end
+
+function PublicAPI:ToggleESP()
+    if ESPController.IsRunning then
+        return PublicAPI:StopESP()
+    else
+        return PublicAPI:StartESP()
+    end
+end
+
+-- Configuration functions
+function PublicAPI:UpdateConfig(newConfig)
+    for key, value in pairs(newConfig) do
+        if ESP_CONFIG[key] ~= nil then
+            ESP_CONFIG[key] = value
+            Utilities.Log(string.format("Config updated: %s = %s", key, tostring(value)), "INFO")
+        end
+    end
+    return ESP_CONFIG
+end
+
+function PublicAPI:GetConfig()
+    return table.clone(ESP_CONFIG)
+end
+
+-- Status functions
+function PublicAPI:GetStatus()
+    return ESPController:GetStatus()
+end
+
+function PublicAPI:GetStatistics()
+    return table.clone(ESP.Statistics)
+end
+
+function PublicAPI:IsInMatch()
+    return MatchDetector.CurrentMatch ~= nil
+end
+
+-- Callback registration
+function PublicAPI:RegisterCallback(eventName, callback)
+    if type(callback) ~= "function" then
+        Utilities.Log("Callback must be a function", "ERROR")
+        return false
+    end
+    
+    ESP.Callbacks[eventName] = callback
+    Utilities.Log(string.format("Callback registered for event: %s", eventName), "INFO")
+    return true
+end
+
+function PublicAPI:UnregisterCallback(eventName)
+    ESP.Callbacks[eventName] = nil
+    return true
+end
+
+-- Memory management
+function PublicAPI:CleanupMemory()
+    Utilities.Log("Performing memory cleanup...", "INFO")
+    
+    -- Force garbage collection
+    collectgarbage()
+    collectgarbage()
+    
+    -- Clean object pool
+    ObjectPool:Cleanup()
+    
+    Utilities.Log("Memory cleanup completed", "INFO")
+    return true
+end
+
+-- Debug functions
+function PublicAPI:DebugInfo()
+    local info = {
+        ModuleID = MODULE_ID,
+        Version = _G.ESPSystem.Version,
+        LoadTime = ESP.State.LoadTime or "N/A",
+        Config = ESP_CONFIG,
+        Status = ESPController:GetStatus(),
+        Statistics = ESP.Statistics
+    }
+    
+    Utilities.Log("=== ESP DEBUG INFO ===", "INFO")
+    for key, value in pairs(info) do
+        if type(value) == "table" then
+            Utilities.Log(key .. ": [TABLE]", "INFO")
+            for k, v in pairs(value) do
+                Utilities.Log(string.format("  %s: %s", k, tostring(v)), "INFO")
+            end
+        else
+            Utilities.Log(string.format("%s: %s", key, tostring(value)), "INFO")
+        end
+    end
+    Utilities.Log("======================", "INFO")
+    
+    return info
+end
+
+-- ============================================
+-- INITIALIZATION
+-- ============================================
+-- Store load time
+ESP.State.LoadTime = tick()
+ESP.State.StartTime = nil
+
+-- Register cleanup on script removal
+local cleanupConnection
+cleanupConnection = game:GetService("CoreGui").ChildRemoved:Connect(function(child)
+    if child == script then
+        Utilities.Log("Script instance removed, cleaning up...", "INFO")
+        PublicAPI:StopESP()
+        Utilities.SafeDisconnect(cleanupConnection)
+        
+        -- Remove from global registry
+        _G.ESPSystem.Modules[MODULE_ID] = nil
+        
+        -- If no modules left, clear the system
+        if next(_G.ESPSystem.Modules) == nil then
+            _G.ESPSystem = nil
+        end
+    end
+end)
+
+-- Auto-start if configured
+if ESP_CONFIG.AUTO_START then
+    task.spawn(function()
+        task.wait(2) -- Wait for game to load
+        local success, err = PublicAPI:StartESP()
+        if not success then
+            Utilities.Log("Auto-start failed: " .. tostring(err), "ERROR")
+        end
+    end)
+end
+
+Utilities.Log(string.format("ESP Module v%s loaded (ID: %s)", _G.ESPSystem.Version, MODULE_ID), "SUCCESS")
+
+-- ============================================
+-- EXPORT PUBLIC API
+-- ============================================
+-- Make API globally accessible
+_G.ESPSystem.API = PublicAPI
+
+-- Return API for module system
+return setmetatable(PublicAPI, {
+    __index = function(self, key)
+        if rawget(self, key) then
+            return rawget(self, key)
+        end
+        Utilities.Log(string.format("Attempted to access non-existent API: %s", key), "WARN")
+        return nil
+    end,
+    
+    __newindex = function(self, key, value)
+        Utilities.Log(string.format("Attempted to modify read-only API: %s", key), "ERROR")
+    end,
+    
+    __tostring = function(self)
+        return string.format("ESPSystem API v%s", _G.ESPSystem.Version)
+    end
+})
