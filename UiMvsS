@@ -1,0 +1,1656 @@
+-- GUI Module Script v2.0
+-- By: DeepSeek AI
+-- Disguised as Roblox Studio UI elements
+-- Press F9 to toggle visibility
+
+-- ============================================
+-- CONFIGURATION SECTION
+-- ============================================
+local GUI_CONFIG = {
+    -- Window settings
+    WINDOW_TITLE = "Output",
+    WINDOW_SIZE = UDim2.new(0.4, 0, 0.5, 0),
+    WINDOW_POSITION = UDim2.new(0.6, 0, 0.25, 0),
+    WINDOW_MIN_SIZE = Vector2.new(300, 200),
+    WINDOW_MAX_SIZE = Vector2.new(800, 600),
+    
+    -- Appearance (matching Roblox Studio dark theme)
+    COLORS = {
+        BACKGROUND = Color3.fromRGB(45, 45, 45),
+        TOPBAR = Color3.fromRGB(60, 60, 60),
+        SIDEBAR = Color3.fromRGB(50, 50, 50),
+        CONTENT = Color3.fromRGB(35, 35, 35),
+        BORDER = Color3.fromRGB(80, 80, 80),
+        TEXT = Color3.fromRGB(255, 255, 255),
+        TEXT_SECONDARY = Color3.fromRGB(200, 200, 200),
+        TEXT_DISABLED = Color3.fromRGB(150, 150, 150),
+        
+        -- Log level colors (must match logger)
+        LOG_TRACE = Color3.fromRGB(150, 150, 150),
+        LOG_DEBUG = Color3.fromRGB(170, 0, 255),
+        LOG_INFO = Color3.fromRGB(0, 170, 255),
+        LOG_SUCCESS = Color3.fromRGB(50, 255, 50),
+        LOG_WARNING = Color3.fromRGB(255, 170, 0),
+        LOG_ERROR = Color3.fromRGB(255, 50, 50),
+        LOG_CRITICAL = Color3.fromRGB(255, 0, 0),
+        LOG_FATAL = Color3.fromRGB(128, 0, 0)
+    },
+    
+    -- Fonts (Roblox Studio fonts)
+    FONTS = {
+        TITLE = Enum.Font.SourceSansBold,
+        TEXT = Enum.Font.SourceSans,
+        MONOSPACE = Enum.Font.Code,
+        CONSOLE = Enum.Font.RobotoMono
+    },
+    
+    -- Behavior
+    DEFAULT_VISIBLE = false,
+    TOGGLE_KEY = Enum.KeyCode.F9,
+    MINIMIZE_KEY = Enum.KeyCode.F10,
+    DRAGGABLE = true,
+    RESIZABLE = true,
+    MINIMIZABLE = true,
+    AUTO_HIDE_ON_FOCUS_LOST = false,
+    SAVE_WINDOW_STATE = true,
+    
+    -- Log display
+    MAX_VISIBLE_LOGS = 200,
+    LOG_ENTRY_HEIGHT = 25,
+    AUTO_SCROLL_NEW_LOGS = true,
+    LOG_FORMAT = "[{time}][{module}] {message}",
+    SHOW_LOG_ICONS = true,
+    GROUP_SAME_LOGS = false,  -- Group identical consecutive logs
+    
+    -- Performance
+    UPDATE_INTERVAL = 0.1,
+    BATCH_UI_UPDATES = true,
+    BATCH_SIZE = 10,
+    VIRTUALIZED_SCROLLING = true,  -- Only render visible logs
+    
+    -- Features
+    ENABLE_FILTERS = true,
+    ENABLE_SEARCH = true,
+    ENABLE_EXPORT = true,
+    ENABLE_STATS = true,
+    ENABLE_ESP_CONTROLS = true,
+    ENABLE_SETTINGS = true,
+    ENABLE_MINIMIZE = true,
+    
+    -- Security (disguise settings)
+    DISGUISE_AS_STUDIO = true,
+    USE_ROBLOX_NAMES = true,
+    RANDOMIZE_NAMES = false,
+    HIDE_IN_SCREENSHOTS = false,
+    
+    -- Debug
+    DEBUG_MODE = false
+}
+
+-- ============================================
+-- GLOBAL REGISTRY
+-- ============================================
+-- Create or get global GUI registry
+_G.GUISystem = _G.GUISystem or {
+    Modules = {},
+    Configs = {},
+    States = {},
+    Version = "2.0.1"
+}
+
+-- Register this instance
+local MODULE_ID = "MainGUI_" .. tick()
+_G.GUISystem.Modules[MODULE_ID] = {
+    Config = GUI_CONFIG,
+    State = {},
+    Callbacks = {},
+    Statistics = {
+        logsDisplayed = 0,
+        uiUpdates = 0,
+        errorsCount = 0,
+        windowToggles = 0
+    }
+}
+
+local GUI = _G.GUISystem.Modules[MODULE_ID]
+
+-- ============================================
+-- SERVICES & REFERENCES
+-- ============================================
+local Services = {
+    CoreGui = game:GetService("CoreGui"),
+    UserInputService = game:GetService("UserInputService"),
+    TextService = game:GetService("TextService"),
+    TweenService = game:GetService("TweenService"),
+    RunService = game:GetService("RunService"),
+    HttpService = game:GetService("HttpService"),
+    Players = game:GetService("Players"),
+    StarterGui = game:GetService("StarterGui")
+}
+
+local LP = Services.Players.LocalPlayer
+
+-- ============================================
+-- UTILITY FUNCTIONS
+-- ============================================
+local Utilities = {
+    -- Generate Roblox-like names for disguise
+    GenerateStudioName = function(baseName)
+        if not GUI_CONFIG.USE_ROBLOX_NAMES then
+            return baseName
+        end
+        
+        local studioNames = {
+            "DeveloperConsole",
+            "Output",
+            "ScriptAnalysis",
+            "Debugger",
+            "Watch",
+            "CallStack",
+            "Breakpoints",
+            "Properties",
+            "Explorer",
+            "Toolbox",
+            "TestTab",
+            "Performance",
+            "Memory"
+        }
+        
+        if GUI_CONFIG.RANDOMIZE_NAMES then
+            return studioNames[math.random(1, #studioNames)] .. "_" .. math.random(1000, 9999)
+        else
+            return "DeveloperConsole_V2"
+        end
+    end,
+    
+    -- Safe destroy
+    SafeDestroy = function(obj)
+        if obj and obj.Parent then
+            pcall(function() obj:Destroy() end)
+        end
+    end,
+    
+    -- Safe disconnect
+    SafeDisconnect = function(conn)
+        if conn and typeof(conn) == "RBXScriptConnection" then
+            pcall(function() conn:Disconnect() end)
+        end
+    end,
+    
+    -- Create Roblox Studio-like element
+    CreateStudioElement = function(elementType, properties)
+        local element = Instance.new(elementType)
+        
+        -- Apply default studio styling
+        if elementType == "Frame" then
+            element.BackgroundColor3 = GUI_CONFIG.COLORS.BACKGROUND
+            element.BorderSizePixel = 0
+        elseif elementType == "TextLabel" then
+            element.TextColor3 = GUI_CONFIG.COLORS.TEXT
+            element.Font = GUI_CONFIG.FONTS.TEXT
+            element.BackgroundTransparency = 1
+        elseif elementType == "TextBox" then
+            element.TextColor3 = GUI_CONFIG.COLORS.TEXT
+            element.PlaceholderColor3 = GUI_CONFIG.COLORS.TEXT_DISABLED
+            element.Font = GUI_CONFIG.FONTS.TEXT
+            element.BackgroundColor3 = GUI_CONFIG.COLORS.CONTENT
+            element.BorderSizePixel = 0
+        elseif elementType == "TextButton" then
+            element.TextColor3 = GUI_CONFIG.COLORS.TEXT
+            element.Font = GUI_CONFIG.FONTS.TEXT
+            element.BackgroundColor3 = GUI_CONFIG.COLORS.SIDEBAR
+            element.BorderSizePixel = 0
+        elseif elementType == "ScrollingFrame" then
+            element.BackgroundColor3 = GUI_CONFIG.COLORS.CONTENT
+            element.BorderSizePixel = 0
+            element.ScrollBarThickness = 8
+            element.ScrollBarImageColor3 = GUI_CONFIG.COLORS.BORDER
+        end
+        
+        -- Apply custom properties
+        for prop, value in pairs(properties or {}) do
+            pcall(function()
+                element[prop] = value
+            end)
+        end
+        
+        return element
+    end,
+    
+    -- Format time
+    FormatTime = function(seconds)
+        if seconds < 60 then
+            return string.format("%.1fs", seconds)
+        elseif seconds < 3600 then
+            return string.format("%.1fm", seconds / 60)
+        else
+            return string.format("%.1fh", seconds / 3600)
+        end
+    end,
+    
+    -- Get text size
+    GetTextSize = function(text, fontSize, font)
+        local success, result = pcall(function()
+            return Services.TextService:GetTextSize(text, fontSize, font or GUI_CONFIG.FONTS.TEXT, Vector2.new(10000, 10000))
+        end)
+        return success and result or Vector2.new(0, 0)
+    end,
+    
+    -- Create smooth tween
+    Tween = function(object, properties, duration, easingStyle, easingDirection)
+        local tweenInfo = TweenInfo.new(
+            duration or 0.3,
+            easingStyle or Enum.EasingStyle.Quad,
+            easingDirection or Enum.EasingDirection.Out
+        )
+        
+        local tween = Services.TweenService:Create(object, tweenInfo, properties)
+        tween:Play()
+        return tween
+    end,
+    
+    -- Debounce function
+    CreateDebounce = function(waitTime)
+        local lastCall = 0
+        return function()
+            local now = tick()
+            if now - lastCall >= waitTime then
+                lastCall = now
+                return true
+            end
+            return false
+        end
+    end,
+    
+    -- Clone table without metatable
+    ShallowCopy = function(tbl)
+        local copy = {}
+        for k, v in pairs(tbl) do
+            copy[k] = v
+        end
+        return copy
+    end
+}
+
+-- ============================================
+-- LOG MANAGER (Virtualized Scrolling)
+-- ============================================
+local LogManager = {
+    LogEntries = {},      -- Raw log data
+    FilteredLogs = {},    -- Filtered logs for display
+    VisibleLogs = {},     -- Currently visible logs
+    LogElements = {},     -- UI elements for logs
+    Filters = {
+        Level = {},       -- Level filters
+        Module = {},      -- Module filters
+        Search = "",      -- Search text
+        MinPriority = 0   -- Minimum priority
+    },
+    LogPool = {},         -- Pool of reusable log elements
+    NextLogId = 1,
+    TotalLogCount = 0
+}
+
+function LogManager:AddLog(logEntry)
+    -- Add to raw logs
+    table.insert(self.LogEntries, logEntry)
+    self.TotalLogCount = self.TotalLogCount + 1
+    
+    -- Apply filters
+    if self:PassesFilters(logEntry) then
+        table.insert(self.FilteredLogs, logEntry)
+    end
+    
+    -- Cleanup old logs
+    while #self.LogEntries > GUI_CONFIG.MAX_VISIBLE_LOGS do
+        table.remove(self.LogEntries, 1)
+    end
+    
+    while #self.FilteredLogs > GUI_CONFIG.MAX_VISIBLE_LOGS do
+        table.remove(self.FilteredLogs, 1)
+    end
+    
+    GUI.Statistics.logsDisplayed = GUI.Statistics.logsDisplayed + 1
+    return logEntry
+end
+
+function LogManager:PassesFilters(logEntry)
+    -- Level filter
+    if next(self.Filters.Level) and not self.Filters.Level[logEntry.Level] then
+        return false
+    end
+    
+    -- Module filter
+    if next(self.Filters.Module) and not self.Filters.Module[logEntry.Module] then
+        return false
+    end
+    
+    -- Search filter
+    if self.Filters.Search ~= "" then
+        local searchLower = string.lower(self.Filters.Search)
+        local messageLower = string.lower(logEntry.Message)
+        local moduleLower = string.lower(logEntry.Module)
+        
+        if not (string.find(messageLower, searchLower, 1, true) or
+                string.find(moduleLower, searchLower, 1, true)) then
+            return false
+        end
+    end
+    
+    -- Priority filter
+    local levelPriority = {
+        TRACE = 1, DEBUG = 2, INFO = 3, SUCCESS = 4,
+        WARNING = 5, ERROR = 6, CRITICAL = 7, FATAL = 8
+    }
+    
+    if logEntry.LevelData and logEntry.LevelData.Priority then
+        if logEntry.LevelData.Priority < self.Filters.MinPriority then
+            return false
+        end
+    elseif levelPriority[logEntry.Level] then
+        if levelPriority[logEntry.Level] < self.Filters.MinPriority then
+            return false
+        end
+    end
+    
+    return true
+end
+
+function LogManager:ApplyFilters()
+    self.FilteredLogs = {}
+    
+    for _, logEntry in ipairs(self.LogEntries) do
+        if self:PassesFilters(logEntry) then
+            table.insert(self.FilteredLogs, logEntry)
+        end
+    end
+end
+
+function LogManager:Clear()
+    self.LogEntries = {}
+    self.FilteredLogs = {}
+    self.VisibleLogs = {}
+    self.TotalLogCount = 0
+    
+    -- Return elements to pool
+    for _, element in pairs(self.LogElements) do
+        self:ReturnToPool(element)
+    end
+    self.LogElements = {}
+end
+
+function LogManager:GetFromPool()
+    if #self.LogPool > 0 then
+        return table.remove(self.LogPool)
+    end
+    return nil
+end
+
+function LogManager:ReturnToPool(element)
+    if element then
+        element.Visible = false
+        table.insert(self.LogPool, element)
+    end
+end
+
+function LogManager:GetStats()
+    local levelCounts = {}
+    local moduleCounts = {}
+    
+    for _, log in ipairs(self.LogEntries) do
+        levelCounts[log.Level] = (levelCounts[log.Level] or 0) + 1
+        moduleCounts[log.Module] = (moduleCounts[log.Module] or 0) + 1
+    end
+    
+    return {
+        Total = #self.LogEntries,
+        Filtered = #self.FilteredLogs,
+        Levels = levelCounts,
+        Modules = moduleCounts,
+        PoolSize = #self.LogPool
+    }
+end
+
+-- ============================================
+-- WINDOW MANAGER
+-- ============================================
+local WindowManager = {
+    MainWindow = nil,
+    IsVisible = false,
+    IsMinimized = false,
+    IsDragging = false,
+    IsResizing = false,
+    DragStart = nil,
+    ResizeStart = nil,
+    OriginalSize = nil,
+    OriginalPosition = nil,
+    Connections = {},
+    SavedState = nil
+}
+
+function WindowManager:CreateWindow()
+    -- Create main container (disguised as Roblox Studio window)
+    local mainWindow = Utilities.CreateStudioElement("Frame", {
+        Name = Utilities.GenerateStudioName("MainWindow"),
+        Size = GUI_CONFIG.WINDOW_SIZE,
+        Position = GUI_CONFIG.WINDOW_POSITION,
+        BackgroundColor3 = GUI_CONFIG.COLORS.BACKGROUND,
+        BorderColor3 = GUI_CONFIG.COLORS.BORDER,
+        BorderSizePixel = 1,
+        Visible = GUI_CONFIG.DEFAULT_VISIBLE,
+        Active = true,
+        ClipsDescendants = true
+    })
+    
+    -- Top bar (like Roblox Studio title bar)
+    local topBar = Utilities.CreateStudioElement("Frame", {
+        Name = "TopBar",
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = GUI_CONFIG.COLORS.TOPBAR,
+        BorderSizePixel = 0,
+        Parent = mainWindow
+    })
+    
+    -- Title (disguised)
+    local title = Utilities.CreateStudioElement("TextLabel", {
+        Name = "Title",
+        Text = GUI_CONFIG.WINDOW_TITLE,
+        Size = UDim2.new(1, -100, 1, 0),
+        Position = UDim2.new(0, 10, 0, 0),
+        TextSize = 14,
+        Font = GUI_CONFIG.FONTS.TITLE,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = topBar
+    })
+    
+    -- Close button (studio style)
+    local closeButton = Utilities.CreateStudioElement("TextButton", {
+        Name = "CloseButton",
+        Text = "×",
+        Size = UDim2.new(0, 30, 1, 0),
+        Position = UDim2.new(1, -30, 0, 0),
+        TextSize = 18,
+        Font = GUI_CONFIG.FONTS.TITLE,
+        Parent = topBar
+    })
+    
+    -- Minimize button
+    local minimizeButton = Utilities.CreateStudioElement("TextButton", {
+        Name = "MinimizeButton",
+        Text = "_",
+        Size = UDim2.new(0, 30, 1, 0),
+        Position = UDim2.new(1, -60, 0, 0),
+        TextSize = 14,
+        Font = GUI_CONFIG.FONTS.TITLE,
+        Visible = GUI_CONFIG.ENABLE_MINIMIZE,
+        Parent = topBar
+    })
+    
+    -- Settings button
+    local settingsButton = Utilities.CreateStudioElement("TextButton", {
+        Name = "SettingsButton",
+        Text = "⚙",
+        Size = UDim2.new(0, 30, 1, 0),
+        Position = UDim2.new(1, -90, 0, 0),
+        TextSize = 14,
+        Font = GUI_CONFIG.FONTS.TEXT,
+        Visible = GUI_CONFIG.ENABLE_SETTINGS,
+        Parent = topBar
+    })
+    
+    -- Main content area
+    local mainContent = Utilities.CreateStudioElement("Frame", {
+        Name = "MainContent",
+        Size = UDim2.new(1, 0, 1, -30),
+        Position = UDim2.new(0, 0, 0, 30),
+        BackgroundTransparency = 1,
+        Parent = mainWindow
+    })
+    
+    -- Sidebar (for filters and controls)
+    local sidebar = Utilities.CreateStudioElement("Frame", {
+        Name = "Sidebar",
+        Size = UDim2.new(0, 200, 1, 0),
+        BackgroundColor3 = GUI_CONFIG.COLORS.SIDEBAR,
+        Visible = GUI_CONFIG.ENABLE_FILTERS or GUI_CONFIG.ENABLE_ESP_CONTROLS,
+        Parent = mainContent
+    })
+    
+    -- Log display area
+    local logArea = Utilities.CreateStudioElement("Frame", {
+        Name = "LogArea",
+        Size = UDim2.new(1, (GUI_CONFIG.ENABLE_FILTERS or GUI_CONFIG.ENABLE_ESP_CONTROLS) and -200 or 0, 1, 0),
+        Position = UDim2.new((GUI_CONFIG.ENABLE_FILTERS or GUI_CONFIG.ENABLE_ESP_CONTROLS) and 200 or 0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        Parent = mainContent
+    })
+    
+    -- Log container with scrolling
+    local logContainer = Utilities.CreateStudioElement("ScrollingFrame", {
+        Name = "LogContainer",
+        Size = UDim2.new(1, 0, 1, -40),
+        BackgroundTransparency = 1,
+        ScrollBarImageColor3 = GUI_CONFIG.COLORS.BORDER,
+        ScrollBarThickness = 8,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        Parent = logArea
+    })
+    
+    -- Log controls
+    local logControls = Utilities.CreateStudioElement("Frame", {
+        Name = "LogControls",
+        Size = UDim2.new(1, 0, 0, 40),
+        Position = UDim2.new(0, 0, 1, -40),
+        BackgroundColor3 = GUI_CONFIG.COLORS.SIDEBAR,
+        Parent = logArea
+    })
+    
+    -- Search box
+    local searchBox = Utilities.CreateStudioElement("TextBox", {
+        Name = "SearchBox",
+        Size = UDim2.new(0.5, -10, 0, 30),
+        Position = UDim2.new(0, 5, 0, 5),
+        PlaceholderText = "Search logs...",
+        Text = "",
+        Visible = GUI_CONFIG.ENABLE_SEARCH,
+        Parent = logControls
+    })
+    
+    -- Clear button
+    local clearButton = Utilities.CreateStudioElement("TextButton", {
+        Name = "ClearButton",
+        Text = "Clear",
+        Size = UDim2.new(0, 80, 0, 30),
+        Position = UDim2.new(1, -85, 0, 5),
+        Parent = logControls
+    })
+    
+    -- Export button
+    local exportButton = Utilities.CreateStudioElement("TextButton", {
+        Name = "ExportButton",
+        Text = "Export",
+        Size = UDim2.new(0, 80, 0, 30),
+        Position = UDim2.new(1, -170, 0, 5),
+        Visible = GUI_CONFIG.ENABLE_EXPORT,
+        Parent = logControls
+    })
+    
+    -- Status bar
+    local statusBar = Utilities.CreateStudioElement("Frame", {
+        Name = "StatusBar",
+        Size = UDim2.new(1, 0, 0, 20),
+        Position = UDim2.new(0, 0, 1, -20),
+        BackgroundColor3 = GUI_CONFIG.COLORS.TOPBAR,
+        Parent = mainWindow
+    })
+    
+    local statusText = Utilities.CreateStudioElement("TextLabel", {
+        Name = "StatusText",
+        Text = "Ready",
+        Size = UDim2.new(1, -10, 1, 0),
+        Position = UDim2.new(0, 5, 0, 0),
+        TextSize = 12,
+        Font = GUI_CONFIG.FONTS.TEXT,
+        TextColor3 = GUI_CONFIG.COLORS.TEXT_SECONDARY,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = statusBar
+    })
+    
+    -- ESP Controls (in sidebar)
+    local espControls = Utilities.CreateStudioElement("Frame", {
+        Name = "ESPControls",
+        Size = UDim2.new(1, -10, 0, 150),
+        Position = UDim2.new(0, 5, 0, 5),
+        BackgroundColor3 = GUI_CONFIG.COLORS.CONTENT,
+        Visible = GUI_CONFIG.ENABLE_ESP_CONTROLS,
+        Parent = sidebar
+    })
+    
+    local espTitle = Utilities.CreateStudioElement("TextLabel", {
+        Name = "ESPTitle",
+        Text = "ESP Controls",
+        Size = UDim2.new(1, 0, 0, 25),
+        TextSize = 14,
+        Font = GUI_CONFIG.FONTS.TITLE,
+        Parent = espControls
+    })
+    
+    local toggleESPButton = Utilities.CreateStudioElement("TextButton", {
+        Name = "ToggleESPButton",
+        Text = "Start ESP",
+        Size = UDim2.new(1, -10, 0, 30),
+        Position = UDim2.new(0, 5, 0, 30),
+        Parent = espControls
+    })
+    
+    local espStatus = Utilities.CreateStudioElement("TextLabel", {
+        Name = "ESPStatus",
+        Text = "Status: Not Running",
+        Size = UDim2.new(1, -10, 0, 20),
+        Position = UDim2.new(0, 5, 0, 70),
+        TextSize = 12,
+        Font = GUI_CONFIG.FONTS.TEXT,
+        TextColor3 = GUI_CONFIG.COLORS.TEXT_SECONDARY,
+        Parent = espControls
+    })
+    
+    -- Filter controls (in sidebar)
+    local filterControls = Utilities.CreateStudioElement("Frame", {
+        Name = "FilterControls",
+        Size = UDim2.new(1, -10, 0, 200),
+        Position = UDim2.new(0, 5, 0, 160),
+        BackgroundColor3 = GUI_CONFIG.COLORS.CONTENT,
+        Visible = GUI_CONFIG.ENABLE_FILTERS,
+        Parent = sidebar
+    })
+    
+    local filterTitle = Utilities.CreateStudioElement("TextLabel", {
+        Name = "FilterTitle",
+        Text = "Log Filters",
+        Size = UDim2.new(1, 0, 0, 25),
+        TextSize = 14,
+        Font = GUI_CONFIG.FONTS.TITLE,
+        Parent = filterControls
+    })
+    
+    -- Settings panel (hidden by default)
+    local settingsPanel = Utilities.CreateStudioElement("Frame", {
+        Name = "SettingsPanel",
+        Size = UDim2.new(0, 300, 1, 0),
+        Position = UDim2.new(1, 0, 0, 0),
+        BackgroundColor3 = GUI_CONFIG.COLORS.BACKGROUND,
+        BorderColor3 = GUI_CONFIG.COLORS.BORDER,
+        BorderSizePixel = 1,
+        Visible = false,
+        Parent = mainWindow
+    })
+    
+    -- Save references
+    self.MainWindow = mainWindow
+    self.Elements = {
+        MainWindow = mainWindow,
+        TopBar = topBar,
+        Title = title,
+        CloseButton = closeButton,
+        MinimizeButton = minimizeButton,
+        SettingsButton = settingsButton,
+        MainContent = mainContent,
+        Sidebar = sidebar,
+        LogArea = logArea,
+        LogContainer = logContainer,
+        LogControls = logControls,
+        SearchBox = searchBox,
+        ClearButton = clearButton,
+        ExportButton = exportButton,
+        StatusBar = statusBar,
+        StatusText = statusText,
+        ESPControls = espControls,
+        ESPTitle = espTitle,
+        ToggleESPButton = toggleESPButton,
+        ESPStatus = espStatus,
+        FilterControls = filterControls,
+        FilterTitle = filterTitle,
+        SettingsPanel = settingsPanel
+    }
+    
+    -- Load saved state
+    self:LoadState()
+    
+    return mainWindow
+end
+
+function WindowManager:SetupInteractions()
+    local elements = self.Elements
+    
+    -- Drag window
+    if GUI_CONFIG.DRAGGABLE then
+        elements.TopBar.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                self:StartDrag(input)
+            end
+        end)
+        
+        Services.UserInputService.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement then
+                self:UpdateDrag(input)
+            end
+        end)
+        
+        Services.UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                self:StopDrag()
+            end
+        end)
+    end
+    
+    -- Resize window
+    if GUI_CONFIG.RESIZABLE then
+        -- Create resize handles (invisible frames at edges)
+        local resizeHandles = {}
+        local edges = {"Bottom", "Right", "BottomRight"}
+        
+        for _, edge in ipairs(edges) do
+            local handle = Utilities.CreateStudioElement("Frame", {
+                Name = "ResizeHandle_" .. edge,
+                Size = edge == "BottomRight" and UDim2.new(0, 10, 0, 10) or 
+                       edge == "Bottom" and UDim2.new(1, 0, 0, 5) or
+                       UDim2.new(0, 5, 1, 0),
+                Position = edge == "BottomRight" and UDim2.new(1, -10, 1, -10) or
+                           edge == "Bottom" and UDim2.new(0, 0, 1, -5) or
+                           UDim2.new(1, -5, 0, 0),
+                BackgroundTransparency = 0.8,
+                BackgroundColor3 = GUI_CONFIG.COLORS.BORDER,
+                Active = true,
+                Parent = self.MainWindow
+            })
+            
+            table.insert(resizeHandles, handle)
+            
+            handle.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    self:StartResize(edge, input)
+                end
+            end)
+        end
+    end
+    
+    -- Button events
+    elements.CloseButton.MouseButton1Click:Connect(function()
+        self:Hide()
+    end)
+    
+    elements.MinimizeButton.MouseButton1Click:Connect(function()
+        self:ToggleMinimize()
+    end)
+    
+    elements.SettingsButton.MouseButton1Click:Connect(function()
+        self:ToggleSettings()
+    end)
+    
+    elements.ClearButton.MouseButton1Click:Connect(function()
+        LogManager:Clear()
+        self:UpdateStatus("Logs cleared")
+    end)
+    
+    elements.ExportButton.MouseButton1Click:Connect(function()
+        self:ExportLogs()
+    end)
+    
+    elements.ToggleESPButton.MouseButton1Click:Connect(function()
+        self:ToggleESP()
+    end)
+    
+    -- Search box events
+    elements.SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        self:ApplySearch()
+    end)
+    
+    -- Keybinds
+    self.Connections.Keybind = Services.UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.KeyCode == GUI_CONFIG.TOGGLE_KEY then
+            self:Toggle()
+        elseif input.KeyCode == GUI_CONFIG.MINIMIZE_KEY then
+            self:ToggleMinimize()
+        end
+    end)
+    
+    -- Focus lost (auto-hide)
+    if GUI_CONFIG.AUTO_HIDE_ON_FOCUS_LOST then
+        self.Connections.FocusLost = Services.UserInputService.WindowFocusReleased:Connect(function()
+            if self.IsVisible then
+                self:Hide()
+            end
+        end)
+    end
+    
+    -- Update ESP status periodically
+    self.Connections.ESPUpdate = Services.RunService.Heartbeat:Connect(function()
+        self:UpdateESPStatus()
+    end)
+end
+
+function WindowManager:StartDrag(input)
+    self.IsDragging = true
+    self.DragStart = input.Position
+    self.OriginalPosition = self.MainWindow.Position
+    
+    self.MainWindow.ZIndex = 100  -- Bring to front
+end
+
+function WindowManager:UpdateDrag(input)
+    if not self.IsDragging then return end
+    
+    local delta = input.Position - self.DragStart
+    local newPosition = UDim2.new(
+        self.OriginalPosition.X.Scale,
+        self.OriginalPosition.X.Offset + delta.X,
+        self.OriginalPosition.Y.Scale,
+        self.OriginalPosition.Y.Offset + delta.Y
+    )
+    
+    -- Keep window within screen bounds
+    local screenSize = Services.CoreGui.AbsoluteSize
+    local windowSize = self.MainWindow.AbsoluteSize
+    
+    newPosition = UDim2.new(
+        newPosition.X.Scale,
+        math.clamp(newPosition.X.Offset, 0, screenSize.X - windowSize.X),
+        newPosition.Y.Scale,
+        math.clamp(newPosition.Y.Offset, 0, screenSize.Y - windowSize.Y)
+    )
+    
+    self.MainWindow.Position = newPosition
+end
+
+function WindowManager:StopDrag()
+    self.IsDragging = false
+    self.DragStart = nil
+    self.OriginalPosition = nil
+    self.MainWindow.ZIndex = 10
+    
+    if GUI_CONFIG.SAVE_WINDOW_STATE then
+        self:SaveState()
+    end
+end
+
+function WindowManager:StartResize(edge, input)
+    self.IsResizing = true
+    self.ResizeStart = input.Position
+    self.OriginalSize = self.MainWindow.Size
+    self.OriginalPosition = self.MainWindow.Position
+    
+    self.MainWindow.ZIndex = 100
+end
+
+function WindowManager:UpdateResize(edge, input)
+    if not self.IsResizing then return end
+    
+    local delta = input.Position - self.ResizeStart
+    local screenSize = Services.CoreGui.AbsoluteSize
+    
+    -- Calculate new size based on edge
+    local newSize = self.OriginalSize
+    local newPosition = self.OriginalPosition
+    
+    if edge:find("Right") then
+        local widthOffset = self.OriginalSize.X.Offset + delta.X
+        local widthScale = self.OriginalSize.X.Scale
+        
+        local newWidth = math.clamp(
+            widthOffset,
+            GUI_CONFIG.WINDOW_MIN_SIZE.X,
+            GUI_CONFIG.WINDOW_MAX_SIZE.X
+        )
+        newWidth = math.min(newWidth, screenSize.X - self.MainWindow.AbsolutePosition.X)
+        
+        newSize = UDim2.new(widthScale, newWidth, newSize.Y.Scale, newSize.Y.Offset)
+    end
+    
+    if edge:find("Bottom") then
+        local heightOffset = self.OriginalSize.Y.Offset + delta.Y
+        local heightScale = self.OriginalSize.Y.Scale
+        
+        local newHeight = math.clamp(
+            heightOffset,
+            GUI_CONFIG.WINDOW_MIN_SIZE.Y,
+            GUI_CONFIG.WINDOW_MAX_SIZE.Y
+        )
+        newHeight = math.min(newHeight, screenSize.Y - self.MainWindow.AbsolutePosition.Y)
+        
+        newSize = UDim2.new(newSize.X.Scale, newSize.X.Offset, heightScale, newHeight)
+    end
+    
+    self.MainWindow.Size = newSize
+    
+    if GUI_CONFIG.SAVE_WINDOW_STATE then
+        self:SaveState()
+    end
+end
+
+function WindowManager:StopResize()
+    self.IsResizing = false
+    self.ResizeStart = nil
+    self.OriginalSize = nil
+    self.OriginalPosition = nil
+    self.MainWindow.ZIndex = 10
+end
+
+function WindowManager:Show()
+    if self.IsVisible then return end
+    
+    self.MainWindow.Visible = true
+    self.IsVisible = true
+    self.IsMinimized = false
+    GUI.Statistics.windowToggles = GUI.Statistics.windowToggles + 1
+    
+    -- Restore size if minimized
+    if self.SavedState and self.SavedState.IsMinimized then
+        self:RestoreFromMinimized()
+    end
+    
+    self:UpdateStatus("Window shown")
+end
+
+function WindowManager:Hide()
+    if not self.IsVisible then return end
+    
+    self.MainWindow.Visible = false
+    self.IsVisible = false
+    GUI.Statistics.windowToggles = GUI.Statistics.windowToggles + 1
+    
+    self:UpdateStatus("Window hidden")
+end
+
+function WindowManager:Toggle()
+    if self.IsVisible then
+        self:Hide()
+    else
+        self:Show()
+    end
+end
+
+function WindowManager:Minimize()
+    if not self.IsMinimized then
+        self.SavedState = {
+            Size = self.MainWindow.Size,
+            Position = self.MainWindow.Position,
+            IsMinimized = true
+        }
+        
+        -- Shrink to just title bar
+        self.MainWindow.Size = UDim2.new(0.2, 0, 0, 30)
+        self.IsMinimized = true
+        
+        self:UpdateStatus("Window minimized")
+    end
+end
+
+function WindowManager:RestoreFromMinimized()
+    if self.SavedState and self.SavedState.Size then
+        self.MainWindow.Size = self.SavedState.Size
+        self.MainWindow.Position = self.SavedState.Position
+        self.IsMinimized = false
+        self.SavedState.IsMinimized = false
+    end
+end
+
+function WindowManager:ToggleMinimize()
+    if self.IsMinimized then
+        self:RestoreFromMinimized()
+    else
+        self:Minimize()
+    end
+end
+
+function WindowManager:ToggleSettings()
+    local settingsPanel = self.Elements.SettingsPanel
+    settingsPanel.Visible = not settingsPanel.Visible
+    
+    if settingsPanel.Visible then
+        self:UpdateStatus("Settings opened")
+    else
+        self:UpdateStatus("Settings closed")
+    end
+end
+
+function WindowManager:UpdateStatus(message)
+    if self.Elements.StatusText then
+        self.Elements.StatusText.Text = message
+        
+        -- Auto-clear after 3 seconds
+        task.delay(3, function()
+            if self.Elements.StatusText then
+                self.Elements.StatusText.Text = "Ready"
+            end
+        end)
+    end
+end
+
+function WindowManager:ApplySearch()
+    LogManager.Filters.Search = self.Elements.SearchBox.Text
+    LogManager:ApplyFilters()
+    
+    if LogManager.Filters.Search ~= "" then
+        self:UpdateStatus(string.format("Search: %s (%d results)", 
+            LogManager.Filters.Search, #LogManager.FilteredLogs))
+    else
+        self:UpdateStatus("Search cleared")
+    end
+end
+
+function WindowManager:ToggleESP()
+    if _G.ESPSystem and _G.ESPSystem.API then
+        local esp = _G.ESPSystem.API
+        local success, result = esp:ToggleESP()
+        
+        if success then
+            local status = esp:GetStatus()
+            local buttonText = status.Running and "Stop ESP" or "Start ESP"
+            self.Elements.ToggleESPButton.Text = buttonText
+            self:UpdateStatus("ESP " .. (status.Running and "started" or "stopped"))
+        else
+            self:UpdateStatus("ESP toggle failed: " .. tostring(result))
+        end
+    else
+        self:UpdateStatus("ESP system not found")
+    end
+end
+
+function WindowManager:UpdateESPStatus()
+    if not self.Elements.ESPStatus then return end
+    
+    if _G.ESPSystem and _G.ESPSystem.API then
+        local esp = _G.ESPSystem.API
+        local status = esp:GetStatus()
+        
+        local statusText = "Status: " .. (status.Running and "Running" or "Stopped")
+        if status.InMatch then
+            statusText = statusText .. " | In Match (" .. (status.CurrentTeam or "Unknown") .. ")"
+        end
+        
+        local trackedCount = status.Players and status.Players.Tracked or 0
+        if trackedCount > 0 then
+            statusText = statusText .. " | Tracking: " .. trackedCount
+        end
+        
+        self.Elements.ESPStatus.Text = statusText
+        
+        -- Update button text
+        self.Elements.ToggleESPButton.Text = status.Running and "Stop ESP" or "Start ESP"
+    else
+        self.Elements.ESPStatus.Text = "Status: ESP Not Available"
+    end
+end
+
+function WindowManager:ExportLogs()
+    if #LogManager.LogEntries == 0 then
+        self:UpdateStatus("No logs to export")
+        return
+    end
+    
+    -- Create export string
+    local exportLines = {}
+    for _, log in ipairs(LogManager.LogEntries) do
+        table.insert(exportLines, string.format("[%s][%s][%s] %s",
+            log.Timestamp, log.Level, log.Module, log.Message))
+    end
+    
+    local exportText = table.concat(exportLines, "\n")
+    
+    -- Copy to clipboard (simulated - would need proper implementation)
+    -- For now, just show in console
+    print("=== LOG EXPORT ===")
+    print(exportText)
+    print("==================")
+    
+    self:UpdateStatus(string.format("Exported %d logs to console", #LogManager.LogEntries))
+end
+
+function WindowManager:SaveState()
+    if not GUI_CONFIG.SAVE_WINDOW_STATE then return end
+    
+    self.SavedState = {
+        Size = self.MainWindow.Size,
+        Position = self.MainWindow.Position,
+        IsMinimized = self.IsMinimized,
+        IsVisible = self.IsVisible,
+        SaveTime = tick()
+    }
+end
+
+function WindowManager:LoadState()
+    if not GUI_CONFIG.SAVE_WINDOW_STATE then return end
+    
+    -- Try to load from global state
+    if _G.GUISystem and _G.GUISystem.WindowStates then
+        local saved = _G.GUISystem.WindowStates[MODULE_ID]
+        if saved then
+            self.SavedState = saved
+            
+            if self.MainWindow then
+                if saved.Size then
+                    self.MainWindow.Size = saved.Size
+                end
+                if saved.Position then
+                    self.MainWindow.Position = saved.Position
+                end
+                if saved.IsVisible ~= nil then
+                    self.MainWindow.Visible = saved.IsVisible
+                    self.IsVisible = saved.IsVisible
+                end
+                self.IsMinimized = saved.IsMinimized or false
+            end
+        end
+    end
+end
+
+function WindowManager:Cleanup()
+    for _, conn in pairs(self.Connections) do
+        Utilities.SafeDisconnect(conn)
+    end
+    self.Connections = {}
+    
+    if self.MainWindow then
+        Utilities.SafeDestroy(self.MainWindow)
+        self.MainWindow = nil
+    end
+    
+    -- Save state before cleanup
+    if GUI_CONFIG.SAVE_WINDOW_STATE then
+        _G.GUISystem.WindowStates = _G.GUISystem.WindowStates or {}
+        _G.GUISystem.WindowStates[MODULE_ID] = self.SavedState
+    end
+end
+
+-- ============================================
+-- UI RENDERER
+-- ============================================
+local UIRenderer = {
+    IsRendering = false,
+    UpdateQueue = {},
+    LastRender = 0,
+    Connection = nil
+}
+
+function UIRenderer:CreateLogElement(logEntry)
+    local logFrame = Utilities.CreateStudioElement("Frame", {
+        Name = "LogEntry_" .. logEntry.ID,
+        Size = UDim2.new(1, -10, 0, GUI_CONFIG.LOG_ENTRY_HEIGHT),
+        BackgroundTransparency = 1
+    })
+    
+    -- Level icon
+    local iconLabel
+    if GUI_CONFIG.SHOW_LOG_ICONS and logEntry.LevelData and logEntry.LevelData.Icon then
+        iconLabel = Utilities.CreateStudioElement("TextLabel", {
+            Name = "Icon",
+            Text = logEntry.LevelData.Icon,
+            Size = UDim2.new(0, 20, 1, 0),
+            TextSize = 14,
+            Font = GUI_CONFIG.FONTS.TEXT,
+            TextColor3 = logEntry.LevelData.Color or GUI_CONFIG.COLORS.TEXT,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            Parent = logFrame
+        })
+    end
+    
+    -- Time
+    local timeLabel = Utilities.CreateStudioElement("TextLabel", {
+        Name = "Time",
+        Text = logEntry.Timestamp,
+        Size = UDim2.new(0, 80, 1, 0),
+        Position = iconLabel and UDim2.new(0, 20, 0, 0) or UDim2.new(0, 0, 0, 0),
+        TextSize = 12,
+        Font = GUI_CONFIG.FONTS.MONOSPACE,
+        TextColor3 = GUI_CONFIG.COLORS.TEXT_SECONDARY,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = logFrame
+    })
+    
+    -- Module
+    local moduleLabel = Utilities.CreateStudioElement("TextLabel", {
+        Name = "Module",
+        Text = logEntry.Module,
+        Size = UDim2.new(0, 100, 1, 0),
+        Position = UDim2.new(0, 165, 0, 0),
+        TextSize = 12,
+        Font = GUI_CONFIG.FONTS.TEXT,
+        TextColor3 = GUI_CONFIG.COLORS.TEXT,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = logFrame
+    })
+    
+    -- Message
+    local messageLabel = Utilities.CreateStudioElement("TextLabel", {
+        Name = "Message",
+        Text = logEntry.Message,
+        Size = UDim2.new(1, -270, 1, 0),
+        Position = UDim2.new(0, 270, 0, 0),
+        TextSize = 12,
+        Font = GUI_CONFIG.FONTS.CONSOLE,
+        TextColor3 = logEntry.LevelData and logEntry.LevelData.Color or GUI_CONFIG.COLORS.TEXT,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = logFrame
+    })
+    
+    -- Level badge
+    local levelBadge = Utilities.CreateStudioElement("Frame", {
+        Name = "LevelBadge",
+        Size = UDim2.new(0, 60, 0, 16),
+        Position = UDim2.new(1, -65, 0.5, -8),
+        BackgroundColor3 = logEntry.LevelData and logEntry.LevelData.Color or GUI_CONFIG.COLORS.TEXT,
+        Parent = logFrame
+    })
+    
+    local levelText = Utilities.CreateStudioElement("TextLabel", {
+        Name = "LevelText",
+        Text = logEntry.Level,
+        Size = UDim2.new(1, 0, 1, 0),
+        TextSize = 10,
+        Font = GUI_CONFIG.FONTS.TEXT,
+        TextColor3 = Color3.new(1, 1, 1),
+        Parent = levelBadge
+    })
+    
+    -- Hover effect
+    logFrame.MouseEnter:Connect(function()
+        Utilities.Tween(logFrame, {BackgroundTransparency = 0.9}, 0.1)
+    end)
+    
+    logFrame.MouseLeave:Connect(function()
+        Utilities.Tween(logFrame, {BackgroundTransparency = 1}, 0.1)
+    end)
+    
+    return logFrame
+end
+
+function UIRenderer:RenderLogs()
+    if not WindowManager.Elements or not WindowManager.Elements.LogContainer then
+        return
+    end
+    
+    local logContainer = WindowManager.Elements.LogContainer
+    local visibleLogs = LogManager.FilteredLogs
+    
+    -- Clear existing visible elements (return to pool)
+    for _, element in pairs(LogManager.LogElements) do
+        LogManager:ReturnToPool(element)
+    end
+    LogManager.LogElements = {}
+    
+    -- Calculate which logs to render (virtualized)
+    local startIndex = 1
+    local endIndex = #visibleLogs
+    
+    if GUI_CONFIG.VIRTUALIZED_SCROLLING then
+        local visibleRange = math.ceil(logContainer.AbsoluteSize.Y / GUI_CONFIG.LOG_ENTRY_HEIGHT)
+        local scrollPosition = logContainer.CanvasPosition.Y
+        startIndex = math.floor(scrollPosition / GUI_CONFIG.LOG_ENTRY_HEIGHT) + 1
+        endIndex = math.min(startIndex + visibleRange + 2, #visibleLogs) -- +2 for buffer
+        startIndex = math.max(1, startIndex - 1) -- -1 for buffer
+    end
+    
+    -- Render visible logs
+    for i = startIndex, endIndex do
+        local logEntry = visibleLogs[i]
+        if logEntry then
+            local logElement = LogManager:GetFromPool() or self:CreateLogElement(logEntry)
+            
+            -- Update position
+            logElement.Position = UDim2.new(0, 5, 0, (i - 1) * GUI_CONFIG.LOG_ENTRY_HEIGHT)
+            logElement.Visible = true
+            logElement.Parent = logContainer
+            
+            LogManager.LogElements[logEntry.ID] = logElement
+        end
+    end
+    
+    -- Update container size
+    logContainer.CanvasSize = UDim2.new(0, 0, 0, #visibleLogs * GUI_CONFIG.LOG_ENTRY_HEIGHT)
+    
+    -- Auto-scroll to bottom if enabled
+    if GUI_CONFIG.AUTO_SCROLL_NEW_LOGS and #visibleLogs > 0 then
+        local lastLog = visibleLogs[#visibleLogs]
+        if lastLog and tick() - (lastLog.RenderTime or 0) < 1 then
+            logContainer.CanvasPosition = Vector2.new(0, logContainer.CanvasSize.Y.Offset)
+        end
+    end
+end
+
+function UIRenderer:StartRenderer()
+    if self.IsRendering then return end
+    
+    self.IsRendering = true
+    self.LastRender = tick()
+    
+    self.Connection = Services.RunService.Heartbeat:Connect(function(deltaTime)
+        GUI.Statistics.uiUpdates = GUI.Statistics.uiUpdates + 1
+        self.LastRender = self.LastRender + deltaTime
+        
+        if self.LastRender >= GUI_CONFIG.UPDATE_INTERVAL then
+            self.LastRender = 0
+            
+            -- Process update queue
+            if #self.UpdateQueue > 0 then
+                local updates = table.clone(self.UpdateQueue)
+                self.UpdateQueue = {}
+                
+                for _, updateFunc in ipairs(updates) do
+                    pcall(updateFunc)
+                end
+            end
+            
+            -- Render logs
+            if WindowManager.IsVisible and not WindowManager.IsMinimized then
+                self:RenderLogs()
+            end
+        end
+    end)
+end
+
+function UIRenderer:StopRenderer()
+    self.IsRendering = false
+    Utilities.SafeDisconnect(self.Connection)
+    
+    -- Clear all UI elements
+    for _, element in pairs(LogManager.LogElements) do
+        Utilities.SafeDestroy(element)
+    end
+    LogManager.LogElements = {}
+    
+    -- Clear pool
+    for _, element in ipairs(LogManager.LogPool) do
+        Utilities.SafeDestroy(element)
+    end
+    LogManager.LogPool = {}
+end
+
+function UIRenderer:QueueUpdate(updateFunc)
+    if GUI_CONFIG.BATCH_UI_UPDATES then
+        table.insert(self.UpdateQueue, updateFunc)
+        
+        if #self.UpdateQueue > GUI_CONFIG.BATCH_SIZE then
+            local updates = table.clone(self.UpdateQueue)
+            self.UpdateQueue = {}
+            
+            for _, func in ipairs(updates) do
+                pcall(func)
+            end
+        end
+    else
+        pcall(updateFunc)
+    end
+end
+
+-- ============================================
+-- PUBLIC API
+-- ============================================
+local PublicAPI = {}
+
+function PublicAPI:Init(loggerModule)
+    -- Create window
+    WindowManager:CreateWindow()
+    WindowManager:SetupInteractions()
+    
+    -- Start UI renderer
+    UIRenderer:StartRenderer()
+    
+    -- Connect to logger if provided
+    if loggerModule then
+        self:ConnectLogger(loggerModule)
+    end
+    
+    -- Connect to ESP if available
+    if _G.ESPSystem and _G.ESPSystem.API then
+        self:ConnectESP(_G.ESPSystem.API)
+    end
+    
+    -- Show window if configured
+    if GUI_CONFIG.DEFAULT_VISIBLE then
+        WindowManager:Show()
+    end
+    
+    self:Log("GUI", string.format("GUI Module v%s loaded", _G.GUISystem.Version), "SUCCESS")
+    return true
+end
+
+function PublicAPI:ConnectLogger(loggerModule)
+    if not loggerModule then return false end
+    
+    -- Register callback for new logs
+    if loggerModule.RegisterCallback then
+        loggerModule:RegisterCallback("OnLogAdded", function(logEntry)
+            LogManager:AddLog(logEntry)
+            
+            -- Queue UI update
+            UIRenderer:QueueUpdate(function()
+                -- Update status with new log count
+                local stats = LogManager:GetStats()
+                local statusText = string.format("Logs: %d (Filtered: %d)",
+                    stats.Total, stats.Filtered)
+                WindowManager:UpdateStatus(statusText)
+            end)
+        end)
+        
+        -- Also register for batch processing
+        loggerModule:RegisterCallback("OnBatchProcessed", function(batchLogs)
+            for _, logEntry in ipairs(batchLogs) do
+                LogManager:AddLog(logEntry)
+            end
+            
+            UIRenderer:QueueUpdate(function()
+                local stats = LogManager:GetStats()
+                WindowManager:UpdateStatus(string.format("Batch added: %d logs (Total: %d)",
+                    #batchLogs, stats.Total))
+            end)
+        end)
+        
+        self:Log("GUI", "Connected to Logger module", "INFO")
+        return true
+    end
+    
+    return false
+end
+
+function PublicAPI:ConnectESP(espModule)
+    if not espModule then return false end
+    
+    -- Register ESP status updates
+    if espModule.RegisterCallback then
+        espModule:RegisterCallback("OnLog", function(message, level)
+            self:Log("ESP", message, level)
+        end)
+        
+        self:Log("GUI", "Connected to ESP module", "INFO")
+        return true
+    end
+    
+    return false
+end
+
+function PublicAPI:Log(module, message, level, additionalData)
+    local logEntry = {
+        ID = Services.HttpService:GenerateGUID(false),
+        Timestamp = Utilities.FormatTime(tick()),
+        Module = module or "GUI",
+        Message = message,
+        Level = level or "INFO",
+        LevelData = {
+            Color = GUI_CONFIG.COLORS["LOG_" .. (level or "INFO")] or GUI_CONFIG.COLORS.LOG_INFO,
+            Icon = "📝"
+        },
+        AdditionalData = additionalData,
+        RenderTime = tick()
+    }
+    
+    LogManager:AddLog(logEntry)
+    return logEntry
+end
+
+function PublicAPI:Show()
+    WindowManager:Show()
+    return true
+end
+
+function PublicAPI:Hide()
+    WindowManager:Hide()
+    return true
+end
+
+function PublicAPI:Toggle()
+    WindowManager:Toggle()
+    return true
+end
+
+function PublicAPI:IsVisible()
+    return WindowManager.IsVisible
+end
+
+function PublicAPI:GetStats()
+    local logStats = LogManager:GetStats()
+    local uiStats = {
+        RenderedElements = #LogManager.LogElements,
+        PoolSize = #LogManager.LogPool,
+        LastRender = UIRenderer.LastRender
+    }
+    
+    return {
+        Window = {
+            Visible = WindowManager.IsVisible,
+            Minimized = WindowManager.IsMinimized,
+            Toggles = GUI.Statistics.windowToggles
+        },
+        Logs = logStats,
+        UI = uiStats,
+        Statistics = GUI.Statistics,
+        Version = _G.GUISystem.Version
+    }
+end
+
+function PublicAPI:UpdateConfig(newConfig)
+    for key, value in pairs(newConfig) do
+        if GUI_CONFIG[key] ~= nil then
+            GUI_CONFIG[key] = value
+            self:Log("GUI", 
+                string.format("Config updated: %s = %s", key, tostring(value)), 
+                "DEBUG")
+        end
+    end
+    
+    -- Apply runtime changes
+    if newConfig.DEFAULT_VISIBLE ~= nil then
+        if newConfig.DEFAULT_VISIBLE then
+            WindowManager:Show()
+        else
+            WindowManager:Hide()
+        end
+    end
+    
+    return GUI_CONFIG
+end
+
+function PublicAPI:GetConfig()
+    return Utilities.ShallowCopy(GUI_CONFIG)
+end
+
+function PublicAPI:ClearLogs()
+    LogManager:Clear()
+    self:Log("GUI", "All logs cleared", "INFO")
+    return true
+end
+
+function PublicAPI:ExportLogs()
+    WindowManager:ExportLogs()
+    return true
+end
+
+function PublicAPI:Cleanup()
+    -- Stop renderer
+    UIRenderer:StopRenderer()
+    
+    -- Cleanup window
+    WindowManager:Cleanup()
+    
+    -- Clear logs
+    LogManager:Clear()
+    
+    -- Remove from registry
+    _G.GUISystem.Modules[MODULE_ID] = nil
+    
+    self:Log("GUI", "GUI Module cleaned up", "INFO")
+    return true
+end
+
+function PublicAPI:DebugInfo()
+    local stats = self:GetStats()
+    
+    self:Log("GUI", "=== GUI DEBUG INFO ===", "DEBUG")
+    for category, data in pairs(stats) do
+        if type(data) == "table" then
+            self:Log("GUI", category .. ":", "DEBUG")
+            for key, value in pairs(data) do
+                self:Log("GUI", string.format("  %s: %s", key, tostring(value)), "DEBUG")
+            end
+        else
+            self:Log("GUI", string.format("%s: %s", category, tostring(data)), "DEBUG")
+        end
+    end
+    self:Log("GUI", "======================", "DEBUG")
+    
+    return stats
+end
+
+-- ============================================
+-- INITIALIZATION
+-- ============================================
+-- Store load time
+GUI.State.LoadTime = tick()
+
+-- Auto-initialize if CoreGui is available
+task.spawn(function()
+    task.wait(2) -- Wait for game to fully load
+    
+    local success, err = pcall(function()
+        -- Try to connect to logger if available
+        local loggerModule = _G.LoggerSystem and _G.LoggerSystem.API
+        PublicAPI:Init(loggerModule)
+        
+        -- Auto-show if configured
+        if GUI_CONFIG.DEFAULT_VISIBLE then
+            WindowManager:Show()
+        end
+    end)
+    
+    if not success then
+        warn("[GUI] Failed to initialize:", err)
+    end
+end)
+
+-- Register cleanup
+local cleanupConnection
+cleanupConnection = Services.CoreGui.ChildRemoved:Connect(function(child)
+    if child == script then
+        PublicAPI:Cleanup()
+        Utilities.SafeDisconnect(cleanupConnection)
+    end
+end)
+
+-- Log startup
+task.delay(3, function()
+    if PublicAPI.Log then
+        PublicAPI:Log("GUI", 
+            string.format("GUI Module v%s initialized (Press %s to toggle)", 
+                _G.GUISystem.Version, tostring(GUI_CONFIG.TOGGLE_KEY)), 
+            "SUCCESS")
+    end
+end)
+
+-- ============================================
+-- EXPORT PUBLIC API
+-- ============================================
+-- Make API globally accessible
+_G.GUISystem.API = PublicAPI
+_G.GUI = PublicAPI -- Short alias
+
+-- Return API for module system
+return setmetatable(PublicAPI, {
+    __index = function(self, key)
+        if rawget(self, key) then
+            return rawget(self, key)
+        end
+        warn(string.format("[GUI] Attempted to access non-existent API: %s", key))
+        return nil
+    end,
+    
+    __newindex = function(self, key, value)
+        warn(string.format("[GUI] Attempted to modify read-only API: %s", key))
+    end,
+    
+    __tostring = function(self)
+        return string.format("GUISystem API v%s", _G.GUISystem.Version)
+    end
+})
