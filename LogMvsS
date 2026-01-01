@@ -1,0 +1,928 @@
+-- Logger Module Script v2.0
+-- By: DeepSeek AI
+-- Usage: Centralized logging system for all modules
+
+-- ============================================
+-- CONFIGURATION SECTION
+-- ============================================
+local LOGGER_CONFIG = {
+    -- Log storage settings
+    MAX_LOGS = 500,                 -- Maximum logs to store in memory
+    AUTO_FLUSH_INTERVAL = 60,       -- Auto flush logs every N seconds (0 to disable)
+    RETAIN_LOGS_ON_RELOAD = false,  -- Keep logs when module reloads
+    
+    -- Output settings
+    ENABLE_CONSOLE_OUTPUT = true,   -- Print logs to console
+    ENABLE_WARN_OUTPUT = true,      -- Use warn() for warnings/errors
+    ENABLE_GLOBAL_ACCESS = true,    -- Make logs available via _G
+    
+    -- Performance settings
+    BUFFER_SIZE = 50,               -- Logs processed in batches
+    BATCH_PROCESS_INTERVAL = 1,     -- Process logs in batches every N seconds
+    
+    -- Format settings
+    TIME_FORMAT = "%H:%M:%S",       -- Time format for logs
+    DATE_FORMAT = "%Y-%m-%d",       -- Date format for logs
+    SHOW_MILLISECONDS = true,       -- Include milliseconds in timestamps
+    
+    -- Features
+    ENABLE_PERFORMANCE_LOGGING = false, -- Log performance metrics
+    ENABLE_MEMORY_MONITOR = false,      -- Monitor memory usage
+    DEBUG_MODE = false                   -- Enable debug logging
+}
+
+-- ============================================
+-- GLOBAL REGISTRY
+-- ============================================
+-- Create or get global Logger registry
+_G.LoggerSystem = _G.LoggerSystem or {
+    Modules = {},
+    Configs = {},
+    States = {},
+    LogPools = {},
+    Version = "2.0.1"
+}
+
+-- Register this instance
+local MODULE_ID = "MainLogger_" .. tick()
+_G.LoggerSystem.Modules[MODULE_ID] = {
+    Config = LOGGER_CONFIG,
+    State = {},
+    Callbacks = {},
+    Statistics = {
+        logsWritten = 0,
+        logsFlushed = 0,
+        errorsCount = 0,
+        performanceEntries = 0
+    }
+}
+
+local LOGGER = _G.LoggerSystem.Modules[MODULE_ID]
+
+-- ============================================
+-- SERVICES & REFERENCES
+-- ============================================
+local Services = {
+    HttpService = game:GetService("HttpService"),
+    RunService = game:GetService("RunService"),
+    Stats = game:GetService("Stats"),
+    MemoryStoreService = game:GetService("MemoryStoreService")
+}
+
+-- ============================================
+-- LOG LEVEL SYSTEM
+-- ============================================
+local LogLevels = {
+    TRACE = {
+        Name = "TRACE",
+        Color = Color3.fromRGB(150, 150, 150),
+        Icon = "🔍",
+        Priority = 1,
+        Console = function(msg) print(msg) end
+    },
+    DEBUG = {
+        Name = "DEBUG",
+        Color = Color3.fromRGB(170, 0, 255),
+        Icon = "🐛",
+        Priority = 2,
+        Console = function(msg) print(msg) end
+    },
+    INFO = {
+        Name = "INFO",
+        Color = Color3.fromRGB(0, 170, 255),
+        Icon = "ℹ️",
+        Priority = 3,
+        Console = function(msg) print(msg) end
+    },
+    SUCCESS = {
+        Name = "SUCCESS",
+        Color = Color3.fromRGB(50, 255, 50),
+        Icon = "✅",
+        Priority = 4,
+        Console = function(msg) print(msg) end
+    },
+    WARNING = {
+        Name = "WARNING",
+        Color = Color3.fromRGB(255, 170, 0),
+        Icon = "⚠️",
+        Priority = 5,
+        Console = function(msg) warn(msg) end
+    },
+    ERROR = {
+        Name = "ERROR",
+        Color = Color3.fromRGB(255, 50, 50),
+        Icon = "❌",
+        Priority = 6,
+        Console = function(msg) warn(msg) end
+    },
+    CRITICAL = {
+        Name = "CRITICAL",
+        Color = Color3.fromRGB(255, 0, 0),
+        Icon = "💥",
+        Priority = 7,
+        Console = function(msg) warn("🔥 CRITICAL: " .. msg) end
+    },
+    FATAL = {
+        Name = "FATAL",
+        Color = Color3.fromRGB(128, 0, 0),
+        Icon = "☠️",
+        Priority = 8,
+        Console = function(msg) error("[FATAL] " .. msg) end
+    }
+}
+
+-- Reverse lookup for quick access
+local LogLevelByName = {}
+for level, data in pairs(LogLevels) do
+    LogLevelByName[data.Name] = data
+end
+
+-- ============================================
+-- UTILITY FUNCTIONS
+-- ============================================
+local Utilities = {
+    -- Generate unique ID
+    GenerateID = function()
+        return Services.HttpService:GenerateGUID(false):sub(1, 8)
+    end,
+    
+    -- Get formatted timestamp
+    GetTimestamp = function()
+        if LOGGER_CONFIG.SHOW_MILLISECONDS then
+            return os.date("%H:%M:%S.") .. string.format("%03d", tick() % 1 * 1000)
+        end
+        return os.date(LOGGER_CONFIG.TIME_FORMAT)
+    end,
+    
+    -- Get current date
+    GetDate = function()
+        return os.date(LOGGER_CONFIG.DATE_FORMAT)
+    end,
+    
+    -- Safe string conversion
+    SafeToString = function(value)
+        local success, result = pcall(function()
+            if type(value) == "table" then
+                return Services.HttpService:JSONEncode(value)
+            elseif type(value) == "function" then
+                return "function: " .. tostring(value)
+            elseif type(value) == "userdata" then
+                return "userdata: " .. tostring(value)
+            else
+                return tostring(value)
+            end
+        end)
+        return success and result or "[Error converting to string]"
+    end,
+    
+    -- Truncate string if too long
+    TruncateString = function(str, maxLength)
+        if not str or type(str) ~= "string" then return str end
+        if #str <= maxLength then return str end
+        return str:sub(1, maxLength - 3) .. "..."
+    end,
+    
+    -- Get memory usage
+    GetMemoryUsage = function()
+        local success, result = pcall(function()
+            return Services.Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Script)
+        end)
+        return success and result or 0
+    end,
+    
+    -- Format bytes
+    FormatBytes = function(bytes)
+        local units = {"B", "KB", "MB", "GB"}
+        local unitIndex = 1
+        while bytes >= 1024 and unitIndex < #units do
+            bytes = bytes / 1024
+            unitIndex = unitIndex + 1
+        end
+        return string.format("%.2f %s", bytes, units[unitIndex])
+    end
+}
+
+-- ============================================
+-- LOG BUFFER SYSTEM (BATCH PROCESSING)
+-- ============================================
+local LogBuffer = {
+    Buffer = {},
+    LastFlush = tick(),
+    TotalBuffered = 0
+}
+
+function LogBuffer:Add(logEntry)
+    table.insert(self.Buffer, logEntry)
+    self.TotalBuffered = self.TotalBuffered + 1
+    
+    -- Process immediately if buffer is full
+    if #self.Buffer >= LOGGER_CONFIG.BUFFER_SIZE then
+        self:Flush()
+    end
+end
+
+function LogBuffer:Flush()
+    if #self.Buffer == 0 then return end
+    
+    local bufferCopy = table.clone(self.Buffer)
+    self.Buffer = {}
+    self.LastFlush = tick()
+    
+    return bufferCopy
+end
+
+function LogBuffer:GetStats()
+    return {
+        Buffered = #self.Buffer,
+        TotalBuffered = self.TotalBuffered,
+        LastFlush = self.LastFlush
+    }
+end
+
+-- ============================================
+-- LOG STORAGE SYSTEM
+-- ============================================
+local LogStorage = {
+    Logs = {},
+    LogIndex = {},
+    Categories = {},
+    StartTime = tick()
+}
+
+function LogStorage:Add(logEntry)
+    -- Add to main log array
+    table.insert(self.Logs, logEntry)
+    
+    -- Update category count
+    local category = logEntry.Module or "Unknown"
+    self.Categories[category] = (self.Categories[category] or 0) + 1
+    
+    -- Index by ID for quick lookup
+    self.LogIndex[logEntry.ID] = #self.Logs
+    
+    -- Maintain max logs limit
+    if #self.Logs > LOGGER_CONFIG.MAX_LOGS then
+        local removed = table.remove(self.Logs, 1)
+        if removed and removed.ID then
+            self.LogIndex[removed.ID] = nil
+        end
+    end
+    
+    return logEntry
+end
+
+function LogStorage:GetLog(id)
+    local index = self.LogIndex[id]
+    return index and self.Logs[index]
+end
+
+function LogStorage:GetLogs(filter)
+    local filtered = {}
+    
+    for _, log in ipairs(self.Logs) do
+        local include = true
+        
+        if filter then
+            if filter.Level and log.Level ~= filter.Level then
+                include = false
+            end
+            if filter.Module and log.Module ~= filter.Module then
+                include = false
+            end
+            if filter.MinPriority and (LogLevelByName[log.Level] or {}).Priority < filter.MinPriority then
+                include = false
+            end
+            if filter.Search and not string.find(string.lower(log.Message), string.lower(filter.Search)) then
+                include = false
+            end
+        end
+        
+        if include then
+            table.insert(filtered, log)
+        end
+    end
+    
+    return filtered
+end
+
+function LogStorage:GetStats()
+    local levelCounts = {}
+    for _, log in ipairs(self.Logs) do
+        levelCounts[log.Level] = (levelCounts[log.Level] or 0) + 1
+    end
+    
+    return {
+        Total = #self.Logs,
+        Categories = self.Categories,
+        Levels = levelCounts,
+        Uptime = tick() - self.StartTime,
+        MemoryUsage = Utilities.GetMemoryUsage()
+    }
+end
+
+function LogStorage:Clear(category)
+    if category then
+        -- Clear only specific category
+        local newLogs = {}
+        for _, log in ipairs(self.Logs) do
+            if log.Module ~= category then
+                table.insert(newLogs, log)
+            end
+        end
+        self.Logs = newLogs
+        self:RebuildIndex()
+    else
+        -- Clear all logs
+        self.Logs = {}
+        self.LogIndex = {}
+        self.Categories = {}
+    end
+end
+
+function LogStorage:RebuildIndex()
+    self.LogIndex = {}
+    for i, log in ipairs(self.Logs) do
+        if log.ID then
+            self.LogIndex[log.ID] = i
+        end
+    end
+end
+
+function LogStorage:Export(format)
+    format = format or "json"
+    
+    if format == "json" then
+        local success, result = pcall(function()
+            return Services.HttpService:JSONEncode({
+                Metadata = {
+                    ExportTime = os.date(),
+                    TotalLogs = #self.Logs,
+                    Uptime = tick() - self.StartTime
+                },
+                Logs = self.Logs
+            })
+        end)
+        return success and result or nil
+    elseif format == "text" then
+        local lines = {}
+        for _, log in ipairs(self.Logs) do
+            table.insert(lines, string.format("[%s][%s][%s] %s",
+                log.Timestamp, log.Level, log.Module, log.Message))
+        end
+        return table.concat(lines, "\n")
+    end
+end
+
+-- ============================================
+-- PERFORMANCE MONITORING
+-- ============================================
+local PerformanceMonitor = {
+    Measurements = {},
+    Thresholds = {
+        WARNING = 0.1,    -- 100ms
+        CRITICAL = 0.5    -- 500ms
+    }
+}
+
+function PerformanceMonitor:StartMeasurement(label)
+    local id = Utilities.GenerateID()
+    self.Measurements[id] = {
+        Label = label or "Untitled",
+        StartTime = tick(),
+        EndTime = nil,
+        Duration = nil,
+        MemoryStart = Utilities.GetMemoryUsage()
+    }
+    return id
+end
+
+function PerformanceMonitor:EndMeasurement(id)
+    local measurement = self.Measurements[id]
+    if not measurement then return nil end
+    
+    measurement.EndTime = tick()
+    measurement.Duration = measurement.EndTime - measurement.StartTime
+    measurement.MemoryEnd = Utilities.GetMemoryUsage()
+    measurement.MemoryDelta = measurement.MemoryEnd - measurement.MemoryStart
+    
+    -- Log performance if enabled
+    if LOGGER_CONFIG.ENABLE_PERFORMANCE_LOGGING then
+        local level = "INFO"
+        if measurement.Duration >= self.Thresholds.CRITICAL then
+            level = "WARNING"
+        elseif measurement.Duration >= self.Thresholds.WARNING then
+            level = "DEBUG"
+        end
+        
+        LoggerCore.Log("Performance", string.format("%s took %.3f seconds (Memory: %.2f MB)",
+            measurement.Label, measurement.Duration, measurement.MemoryDelta), level)
+    end
+    
+    LOGGER.Statistics.performanceEntries = LOGGER.Statistics.performanceEntries + 1
+    return measurement
+end
+
+function PerformanceMonitor:GetStats()
+    local totalDuration = 0
+    local count = 0
+    local slowest = {Duration = 0}
+    
+    for _, measurement in pairs(self.Measurements) do
+        if measurement.Duration then
+            totalDuration = totalDuration + measurement.Duration
+            count = count + 1
+            if measurement.Duration > slowest.Duration then
+                slowest = measurement
+            end
+        end
+    end
+    
+    return {
+        TotalMeasurements = count,
+        AverageDuration = count > 0 and totalDuration / count or 0,
+        Slowest = slowest,
+        ActiveMeasurements = table.count(self.Measurements) - count
+    }
+end
+
+-- ============================================
+-- CORE LOGGER FUNCTIONS
+-- ============================================
+local LoggerCore = {}
+
+function LoggerCore.CreateLogEntry(module, message, level, additionalData)
+    level = level or "INFO"
+    local levelData = LogLevelByName[level:upper()] or LogLevels.INFO
+    
+    local logEntry = {
+        ID = Utilities.GenerateID(),
+        Timestamp = Utilities.GetTimestamp(),
+        Date = Utilities.GetDate(),
+        Module = module or "Unknown",
+        Message = Utilities.SafeToString(message),
+        Level = levelData.Name,
+        LevelData = {
+            Color = levelData.Color,
+            Icon = levelData.Icon,
+            Priority = levelData.Priority
+        },
+        AdditionalData = additionalData,
+        MemoryUsage = Utilities.GetMemoryUsage(),
+        StackTrace = debug.traceback()
+    }
+    
+    return logEntry
+end
+
+function LoggerCore.ProcessLogEntry(logEntry)
+    -- Store in memory
+    local storedLog = LogStorage:Add(logEntry)
+    
+    -- Add to buffer for batch processing
+    LogBuffer:Add(logEntry)
+    
+    -- Output to console if enabled
+    if LOGGER_CONFIG.ENABLE_CONSOLE_OUTPUT then
+        local consoleMsg = string.format("[%s][%s][%s] %s",
+            logEntry.Timestamp,
+            logEntry.Level,
+            logEntry.Module,
+            logEntry.Message)
+        
+        -- Use appropriate output function
+        if LOGGER_CONFIG.ENABLE_WARN_OUTPUT and 
+           (logEntry.Level == "WARNING" or logEntry.Level == "ERROR" or 
+            logEntry.Level == "CRITICAL" or logEntry.Level == "FATAL") then
+            warn(consoleMsg)
+        else
+            print(consoleMsg)
+        end
+    end
+    
+    -- Call external callbacks
+    if LOGGER.Callbacks.OnLogAdded then
+        local success, err = pcall(function()
+            LOGGER.Callbacks.OnLogAdded(logEntry)
+        end)
+        if not success and LOGGER_CONFIG.DEBUG_MODE then
+            warn("[Logger] Callback error:", err)
+        end
+    end
+    
+    LOGGER.Statistics.logsWritten = LOGGER.Statistics.logsWritten + 1
+    return storedLog
+end
+
+function LoggerCore.Log(module, message, level, additionalData)
+    local success, logEntry, err = pcall(function()
+        -- Create log entry
+        local entry = LoggerCore.CreateLogEntry(module, message, level, additionalData)
+        
+        -- Process immediately (not buffered)
+        return LoggerCore.ProcessLogEntry(entry)
+    end)
+    
+    if not success then
+        LOGGER.Statistics.errorsCount = LOGGER.Statistics.errorsCount + 1
+        
+        -- Try to log the error itself
+        pcall(function()
+            local errorEntry = LoggerCore.CreateLogEntry("Logger", 
+                "Failed to log message: " .. Utilities.SafeToString(err), "ERROR")
+            LoggerCore.ProcessLogEntry(errorEntry)
+        end)
+        
+        return nil, err
+    end
+    
+    return logEntry
+end
+
+-- Convenience methods for each log level
+for levelName, levelData in pairs(LogLevels) do
+    LoggerCore[levelName:lower()] = function(module, message, additionalData)
+        return LoggerCore.Log(module, message, levelData.Name, additionalData)
+    end
+end
+
+-- ============================================
+-- BATCH PROCESSOR
+-- ============================================
+local BatchProcessor = {
+    IsRunning = false,
+    Connection = nil
+}
+
+function BatchProcessor:Start()
+    if self.IsRunning then return end
+    
+    self.IsRunning = true
+    self.Connection = Services.RunService.Heartbeat:Connect(function(deltaTime)
+        -- Process buffered logs at interval
+        if tick() - LogBuffer.LastFlush >= LOGGER_CONFIG.BATCH_PROCESS_INTERVAL then
+            local logsToProcess = LogBuffer:Flush()
+            if #logsToProcess > 0 then
+                LOGGER.Statistics.logsFlushed = LOGGER.Statistics.logsFlushed + #logsToProcess
+                
+                -- Call batch callback if registered
+                if LOGGER.Callbacks.OnBatchProcessed then
+                    local success, err = pcall(function()
+                        LOGGER.Callbacks.OnBatchProcessed(logsToProcess)
+                    end)
+                    if not success and LOGGER_CONFIG.DEBUG_MODE then
+                        warn("[Logger] Batch callback error:", err)
+                    end
+                end
+            end
+        end
+        
+        -- Auto-flush old logs if enabled
+        if LOGGER_CONFIG.AUTO_FLUSH_INTERVAL > 0 then
+            local now = tick()
+            if now - (LOGGER.State.LastAutoFlush or 0) >= LOGGER_CONFIG.AUTO_FLUSH_INTERVAL then
+                LoggerCore.Log("Logger", "Auto-flushing old logs...", "DEBUG")
+                LogStorage:Clear("Old") -- Clear logs older than threshold
+                LOGGER.State.LastAutoFlush = now
+            end
+        end
+    end)
+end
+
+function BatchProcessor:Stop()
+    if not self.IsRunning then return end
+    
+    Utilities.SafeDisconnect(self.Connection)
+    self.IsRunning = false
+    
+    -- Flush any remaining logs
+    local remainingLogs = LogBuffer:Flush()
+    if #remainingLogs > 0 then
+        LoggerCore.Log("Logger", 
+            string.format("Flushed %d logs on shutdown", #remainingLogs), 
+            "INFO")
+    end
+end
+
+-- ============================================
+-- PUBLIC API
+-- ============================================
+local PublicAPI = {}
+
+-- Main logging functions
+function PublicAPI:Log(module, message, level, additionalData)
+    return LoggerCore.Log(module, message, level, additionalData)
+end
+
+-- Convenience methods for each log level
+for levelName in pairs(LogLevels) do
+    PublicAPI[levelName:lower()] = function(self, module, message, additionalData)
+        return LoggerCore[levelName:lower()](module, message, additionalData)
+    end
+end
+
+-- Log querying functions
+function PublicAPI:GetLogs(filter)
+    return LogStorage:GetLogs(filter)
+end
+
+function PublicAPI:GetLog(id)
+    return LogStorage:GetLog(id)
+end
+
+function PublicAPI:GetStats()
+    local storageStats = LogStorage:GetStats()
+    local bufferStats = LogBuffer:GetStats()
+    local perfStats = PerformanceMonitor:GetStats()
+    
+    return {
+        Storage = storageStats,
+        Buffer = bufferStats,
+        Performance = perfStats,
+        Module = {
+            Uptime = tick() - (LOGGER.State.StartTime or tick()),
+            Version = _G.LoggerSystem.Version,
+            Config = LOGGER_CONFIG,
+            Statistics = LOGGER.Statistics
+        }
+    }
+end
+
+function PublicAPI:GetCategories()
+    local categories = {}
+    for category in pairs(LogStorage.Categories) do
+        table.insert(categories, category)
+    end
+    table.sort(categories)
+    return categories
+end
+
+-- Configuration functions
+function PublicAPI:UpdateConfig(newConfig)
+    for key, value in pairs(newConfig) do
+        if LOGGER_CONFIG[key] ~= nil then
+            LOGGER_CONFIG[key] = value
+            LoggerCore.Log("Logger", 
+                string.format("Config updated: %s = %s", key, Utilities.SafeToString(value)), 
+                "DEBUG")
+        end
+    end
+    
+    -- Apply runtime changes
+    if newConfig.ENABLE_CONSOLE_OUTPUT ~= nil then
+        -- Update console output setting
+    end
+    
+    return LOGGER_CONFIG
+end
+
+function PublicAPI:GetConfig()
+    return table.clone(LOGGER_CONFIG)
+end
+
+-- Log management functions
+function PublicAPI:ClearLogs(category)
+    LogStorage:Clear(category)
+    LoggerCore.Log("Logger", 
+        category and string.format("Cleared logs for category: %s", category) or "Cleared all logs",
+        "INFO")
+    return true
+end
+
+function PublicAPI:ExportLogs(format)
+    local exported = LogStorage:Export(format)
+    if exported then
+        LoggerCore.Log("Logger", 
+            string.format("Exported %d logs as %s", #LogStorage.Logs, format or "json"),
+            "INFO")
+    end
+    return exported
+end
+
+function PublicAPI:SearchLogs(query, caseSensitive)
+    local results = {}
+    local searchText = caseSensitive and query or string.lower(query)
+    
+    for _, log in ipairs(LogStorage.Logs) do
+        local logText = caseSensitive and log.Message or string.lower(log.Message)
+        if string.find(logText, searchText, 1, true) then
+            table.insert(results, log)
+        end
+    end
+    
+    return results
+end
+
+-- Performance monitoring functions
+function PublicAPI:StartTimer(label)
+    return PerformanceMonitor:StartMeasurement(label)
+end
+
+function PublicAPI:EndTimer(id)
+    return PerformanceMonitor:EndMeasurement(id)
+end
+
+function PublicAPI:MeasurePerformance(label, callback)
+    local timerId = self:StartTimer(label)
+    local success, result = pcall(callback)
+    local measurement = self:EndTimer(timerId)
+    return success, result, measurement
+end
+
+-- Callback registration
+function PublicAPI:RegisterCallback(eventName, callback)
+    if type(callback) ~= "function" then
+        LoggerCore.Log("Logger", "Callback must be a function", "ERROR")
+        return false
+    end
+    
+    local validEvents = {
+        "OnLogAdded",          -- Called when a single log is added
+        "OnBatchProcessed",    -- Called when logs are processed in batch
+        "OnConfigChanged",     -- Called when config is updated
+        "OnError"              -- Called when logger encounters an error
+    }
+    
+    if not table.find(validEvents, eventName) then
+        LoggerCore.Log("Logger", 
+            string.format("Invalid event: %s. Valid events: %s", 
+                eventName, table.concat(validEvents, ", ")), 
+            "ERROR")
+        return false
+    end
+    
+    LOGGER.Callbacks[eventName] = callback
+    LoggerCore.Log("Logger", 
+        string.format("Callback registered for event: %s", eventName), 
+        "DEBUG")
+    
+    return true
+end
+
+function PublicAPI:UnregisterCallback(eventName)
+    if LOGGER.Callbacks[eventName] then
+        LOGGER.Callbacks[eventName] = nil
+        LoggerCore.Log("Logger", 
+            string.format("Callback unregistered for event: %s", eventName), 
+            "DEBUG")
+        return true
+    end
+    return false
+end
+
+-- System control functions
+function PublicAPI:Start()
+    BatchProcessor:Start()
+    LoggerCore.Log("Logger", "Logger system started", "SUCCESS")
+    return true
+end
+
+function PublicAPI:Stop()
+    BatchProcessor:Stop()
+    LoggerCore.Log("Logger", "Logger system stopped", "INFO")
+    return true
+end
+
+function PublicAPI:Restart()
+    self:Stop()
+    task.wait(0.5)
+    return self:Start()
+end
+
+function PublicAPI:GetMemoryUsage()
+    return Utilities.GetMemoryUsage()
+end
+
+function PublicAPI:ForceGC()
+    local before = collectgarbage("count")
+    collectgarbage()
+    collectgarbage()
+    local after = collectgarbage("count")
+    
+    local freed = before - after
+    LoggerCore.Log("Logger", 
+        string.format("Garbage collection freed %.2f KB", freed), 
+        "DEBUG")
+    
+    return freed
+end
+
+-- Debug functions
+function PublicAPI:DebugInfo()
+    local stats = self:GetStats()
+    
+    local info = {
+        ModuleID = MODULE_ID,
+        Version = _G.LoggerSystem.Version,
+        Status = BatchProcessor.IsRunning and "Running" or "Stopped",
+        Config = LOGGER_CONFIG,
+        Statistics = stats
+    }
+    
+    -- Log debug info
+    LoggerCore.Log("Logger", "=== LOGGER DEBUG INFO ===", "DEBUG")
+    for key, value in pairs(info) do
+        if type(value) == "table" then
+            LoggerCore.Log("Logger", key .. ": [TABLE]", "DEBUG")
+            for k, v in pairs(value) do
+                LoggerCore.Log("Logger", string.format("  %s: %s", k, Utilities.SafeToString(v)), "DEBUG")
+            end
+        else
+            LoggerCore.Log("Logger", string.format("%s: %s", key, Utilities.SafeToString(value)), "DEBUG")
+        end
+    end
+    LoggerCore.Log("Logger", "==========================", "DEBUG")
+    
+    return info
+end
+
+-- ============================================
+-- INITIALIZATION
+-- ============================================
+-- Store load time
+LOGGER.State.StartTime = tick()
+LOGGER.State.LastAutoFlush = tick()
+
+-- Restore logs from previous session if enabled
+if LOGGER_CONFIG.RETAIN_LOGS_ON_RELOAD and _G.LoggerSystem.LogPools then
+    LogStorage.Logs = _G.LoggerSystem.LogPools.Logs or {}
+    LogStorage:RebuildIndex()
+    LoggerCore.Log("Logger", 
+        string.format("Restored %d logs from previous session", #LogStorage.Logs), 
+        "INFO")
+end
+
+-- Start batch processor
+BatchProcessor:Start()
+
+-- Register cleanup on script removal
+local cleanupConnection
+cleanupConnection = game:GetService("CoreGui").ChildRemoved:Connect(function(child)
+    if child == script then
+        LoggerCore.Log("Logger", "Script instance removed, cleaning up...", "INFO")
+        
+        -- Save logs if retention is enabled
+        if LOGGER_CONFIG.RETAIN_LOGS_ON_RELOAD then
+            _G.LoggerSystem.LogPools = {
+                Logs = LogStorage.Logs,
+                Timestamp = tick()
+            }
+        end
+        
+        -- Stop processor
+        BatchProcessor:Stop()
+        Utilities.SafeDisconnect(cleanupConnection)
+        
+        -- Remove from global registry
+        _G.LoggerSystem.Modules[MODULE_ID] = nil
+        
+        -- If no modules left, clear the system (but keep LogPools)
+        if next(_G.LoggerSystem.Modules) == nil then
+            if not LOGGER_CONFIG.RETAIN_LOGS_ON_RELOAD then
+                _G.LoggerSystem = nil
+            end
+        end
+    end
+end)
+
+-- Log startup message
+LoggerCore.Log("Logger", 
+    string.format("Logger Module v%s loaded (ID: %s)", _G.LoggerSystem.Version, MODULE_ID), 
+    "SUCCESS")
+
+-- ============================================
+-- EXPORT PUBLIC API
+-- ============================================
+-- Make API globally accessible
+_G.LoggerSystem.API = PublicAPI
+
+-- Also create shortcut if enabled
+if LOGGER_CONFIG.ENABLE_GLOBAL_ACCESS then
+    _G.Logger = PublicAPI
+end
+
+-- Return API for module system
+return setmetatable(PublicAPI, {
+    __index = function(self, key)
+        if rawget(self, key) then
+            return rawget(self, key)
+        end
+        LoggerCore.Log("Logger", 
+            string.format("Attempted to access non-existent API: %s", key), 
+            "WARN")
+        return nil
+    end,
+    
+    __newindex = function(self, key, value)
+        LoggerCore.Log("Logger", 
+            string.format("Attempted to modify read-only API: %s", key), 
+            "ERROR")
+    end,
+    
+    __tostring = function(self)
+        return string.format("LoggerSystem API v%s", _G.LoggerSystem.Version)
+    end,
+    
+    __call = function(self, module, message, level)
+        return self:Log(module, message, level)
+    end
+})
