@@ -1,0 +1,163 @@
+local genv = getgenv()
+
+if genv.EnemyESP then
+	genv.EnemyESP.Stop()
+end
+
+genv.EnemyESP = {}
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+local CONFIG = {
+	HIGHLIGHT_COLOR = Color3.fromRGB(255, 0, 0),
+	FILL_TRANSPARENCY = 0.5,
+	MAX_ENEMIES = 7,
+	SCAN_INTERVAL = 0.2
+}
+
+local highlights = {}
+local charConnections = {}
+local isPlaying = false
+local scanTimer = 0
+local mainConnection
+
+local function disconnectChar(player)
+	if charConnections[player] then
+		charConnections[player]:Disconnect()
+		charConnections[player] = nil
+	end
+end
+
+local function removeHighlight(player)
+	if highlights[player] then
+		highlights[player]:Destroy()
+		highlights[player] = nil
+	end
+	disconnectChar(player)
+end
+
+local function clearAllHighlights()
+	for p in pairs(highlights) do
+		removeHighlight(p)
+	end
+end
+
+local function bindHighlight(player)
+	if highlights[player] then return end
+	local function apply(char)
+		if not char then return end
+		if not char:FindFirstChild("HumanoidRootPart") then return end
+		if highlights[player] then
+			highlights[player].Adornee = char
+			return
+		end
+		local h = Instance.new("Highlight")
+		h.Adornee = char
+		h.FillColor = CONFIG.HIGHLIGHT_COLOR
+		h.FillTransparency = CONFIG.FILL_TRANSPARENCY
+		h.OutlineTransparency = 1
+		h.Parent = CoreGui
+		highlights[player] = h
+	end
+	if player.Character then
+		apply(player.Character)
+	end
+
+	charConnections[player] = player.CharacterAdded:Connect(apply)
+end
+
+-- HOLDER: CORE SCAN LOGIC
+local function scanEnemies()
+	local runningGames = workspace:FindFirstChild("RunningGames")
+	if not runningGames then
+		if isPlaying then
+			isPlaying = false
+			clearAllHighlights()
+		end
+		return
+	end
+
+	local foundMyMatch = false
+	local myAliveFolder
+	local myTeamFolder
+
+	for _, match in pairs(runningGames:GetChildren()) do
+		local alive = match:FindFirstChild("AlivePlayers")
+		if alive then
+			for _, team in pairs(alive:GetChildren()) do
+				if team:FindFirstChild(LocalPlayer.Name) then
+					foundMyMatch = true
+					myAliveFolder = alive
+					myTeamFolder = team
+					break
+				end
+			end
+		end
+		if foundMyMatch then break end
+	end
+	if not foundMyMatch then
+		if isPlaying then
+			isPlaying = false
+			clearAllHighlights()
+		end
+		return
+	end
+	if not isPlaying then
+		isPlaying = true
+		clearAllHighlights()
+	end
+
+	local enemyCount = 0
+	local validEnemies = {}
+	for _, team in pairs(myAliveFolder:GetChildren()) do
+		if team ~= myTeamFolder then
+			for _, enemy in pairs(team:GetChildren()) do
+				if enemyCount >= CONFIG.MAX_ENEMIES then break end
+				local enemyPlayer = Players:FindFirstChild(enemy.Name)
+				if enemyPlayer then
+					validEnemies[enemyPlayer] = true
+					bindHighlight(enemyPlayer)
+					enemyCount += 1
+				end
+			end
+		end
+	end
+	for player in pairs(highlights) do
+		if not validEnemies[player] then
+			removeHighlight(player)
+		end
+	end
+end
+
+function genv.EnemyESP.Start()
+	if mainConnection then return end
+	mainConnection = RunService.RenderStepped:Connect(function(dt)
+		scanTimer += dt
+		if scanTimer >= CONFIG.SCAN_INTERVAL then
+			scanEnemies()
+			scanTimer = 0
+		end
+	end)
+end
+
+function genv.EnemyESP.Stop()
+	if mainConnection then
+		mainConnection:Disconnect()
+		mainConnection = nil
+	end
+	clearAllHighlights()
+	isPlaying = false
+end
+
+function genv.EnemyESP.Toggle()
+	if mainConnection then
+		genv.EnemyESP.Stop()
+	else
+		genv.EnemyESP.Start()
+	end
+end
+
+genv.EnemyESP.Start()
