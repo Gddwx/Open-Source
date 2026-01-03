@@ -1,0 +1,94 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+-- config
+_G.HRPHitbox = true
+_G.HRPSize = 5
+_G.UpdateDelay = 0.9
+_G.UseBox = true
+
+local originalSize = {}
+local function getEnemyPlayers()
+    local enemies = {}
+    local runningGames = workspace:FindFirstChild("RunningGames")
+    if not runningGames then return enemies end
+    for _, match in ipairs(runningGames:GetChildren()) do
+        local alive = match:FindFirstChild("AlivePlayers")
+        if not alive then continue end
+        local myTeam
+        for _, team in ipairs(alive:GetChildren()) do
+            if team:FindFirstChild(LocalPlayer.Name) then
+                myTeam = team
+                break
+            end
+        end
+        if not myTeam then continue end
+        for _, team in ipairs(alive:GetChildren()) do
+            if team ~= myTeam then
+                for _, f in ipairs(team:GetChildren()) do
+                    local plr = Players:FindFirstChild(f.Name)
+                    if plr and plr.Character then
+                        enemies[#enemies + 1] = plr
+                    end
+                end
+            end
+        end
+        break
+    end
+    return enemies
+end
+
+local function addBox(hrp)
+    if hrp:FindFirstChild("HitboxBox") then return end
+    local box = Instance.new("BoxHandleAdornment")
+    box.Name = "HitboxBox"
+    box.Adornee = hrp
+    box.AlwaysOnTop = true
+    box.ZIndex = 10
+    box.Size = hrp.Size
+    box.Transparency = 0.45
+    box.Color3 = Color3.fromRGB(255, 0, 0)
+    box.Parent = hrp
+end
+
+local function applyHRPHitbox()
+    if not _G.HRPHitbox then return end
+    for _, plr in ipairs(getEnemyPlayers()) do
+        local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            if not originalSize[hrp] then
+                originalSize[hrp] = hrp.Size
+            end
+            hrp.Size = Vector3.new(_G.HRPSize, _G.HRPSize, _G.HRPSize)
+            hrp.CanCollide = false
+            if _G.UseBox then
+                addBox(hrp)
+            else
+                hrp.Transparency = 0.6
+                hrp.Material = Enum.Material.Neon
+                hrp.BrickColor = BrickColor.new("Really red")
+            end
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(_G.UpdateDelay) do
+        applyHRPHitbox()
+    end
+end)
+
+_G.RestoreHRP = function()
+    _G.HRPHitbox = false
+    for hrp, size in pairs(originalSize) do
+        if hrp and hrp.Parent then
+            hrp.Size = size
+            hrp.Transparency = 0
+            hrp.Material = Enum.Material.Plastic
+            hrp.BrickColor = BrickColor.new("Medium stone grey")
+            if hrp:FindFirstChild("HitboxBox") then
+                hrp.HitboxBox:Destroy()
+            end
+        end
+    end
+    table.clear(originalSize)
+end
