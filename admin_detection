@@ -1,0 +1,325 @@
+-- Admin Detector
+-- Features: owner auto-add, blacklist file, visited anti-revisit, hour reset,
+-- group-rank detection with cache, HTTP safety caps, executor queue_on_teleport support
+
+-- CONFIG
+local MAIN_SCRIPT_URL = nil    -- optional: URL main script to queue_on_teleport
+local ROOT_FOLDER = "AdminDetector"
+local PLACE_FOLDER = ROOT_FOLDER .. "/" .. tostring(game.PlaceId)
+local BLACKLIST_FILE = PLACE_FOLDER .. "/blacklist.json"
+local VISITED_FILE = PLACE_FOLDER .. "/visited.json"
+local DEBUG = false        -- set true if you want debug via rconsoleprint
+local MAX_PAGES = 3
+local MAX_HTTP_CALLS_PER_ACTION = 5
+local PAGE_DELAY = 0.25
+local REPL_RETRIES = 2
+local REPL_WAIT = 0.15
+local MIN_ADMIN_RANK = 200   -- group rank threshold for admin
+local SILENT = true       -- silent hop
+local MAIN_PLACE_ID = nil    -- set to a PlaceId to treat other places as subplace (unsafe), nil = disabled
+
+-- SERVICES
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+
+-- FS capabilities detection
+local canRead = type(readfile) == "function"
+local canWrite = type(writefile) == "function"
+local canDel = type(delfile) == "function"
+local canMakeFolder = type(makefolder) == "function"
+local canIsFolder = type(isfolder) == "function"
+local canIsFile = type(isfile) == "function"
+
+-- Utilities
+local function dbg(...)
+    if not DEBUG then return end
+    local t = {...}
+    for i=1,#t do t[i]=tostring(t[i]) end
+    pcall(function() rconsoleprint(table.concat(t," ").."\n") end)
+end
+
+local function safeDecode(s)
+    local ok, res = pcall(function() return HttpService:JSONDecode(s) end)
+    if ok then return res end
+    return nil
+end
+
+local function safeEncode(t)
+    local ok, res = pcall(function() return HttpService:JSONEncode(t) end)
+    if ok then return res end
+    return nil
+end
+
+local function currentUTCHour()
+    return tostring(os.date("!*t").hour)
+end
+
+-- Ensure folders/files
+if canMakeFolder and (not canIsFolder(ROOT_FOLDER)) then pcall(makefolder, ROOT_FOLDER) end
+if canMakeFolder and (not canIsFolder(PLACE_FOLDER)) then pcall(makefolder, PLACE_FOLDER) end
+if canWrite and not canIsFile(BLACKLIST_FILE) then pcall(writefile, BLACKLIST_FILE, "{}") end
+if canWrite and not canIsFile(VISITED_FILE) then
+    local init = { hour = currentUTCHour(), visited = {} }
+    pcall(writefile, VISITED_FILE, HttpService:JSONEncode(init))
+end
+
+-- Load/Save helpers
+local function loadBlacklist()
+    if not canRead then return {} end
+    local ok, raw = pcall(readfile, BLACKLIST_FILE)
+    if not ok or not raw then return {} end
+    local dec = safeDecode(raw)
+    return (type(dec) == "table") and dec or {}
+end
+
+local function saveBlacklist(tbl)
+    if not canWrite then return end
+    pcall(function() writefile(BLACKLIST_FILE, HttpService:JSONEncode(tbl)) end)
+end
+
+local function loadVisited()
+    if not canRead then return { hour = currentUTCHour(), visited = {} } end
+    local ok, raw = pcall(readfile, VISITED_FILE)
+    if not ok or not raw then return { hour = currentUTCHour(), visited = {} } end
+    local dec = safeDecode(raw)
+    if type(dec) == "table" and dec.visited then return dec end
+    return { hour = currentUTCHour(), visited = {} }
+end
+
+local function saveVisited(t)
+    if not canWrite then return end
+    pcall(function() writefile(VISITED_FILE, HttpService:JSONEncode(t)) end)
+end
+
+-- setupQueueOnTeleport (executor-agnostic)
+local function setupQueueOnTeleport(url)
+    if not url then return false end
+    local ok = false
+    pcall(function()
+        if queue_on_teleport then
+            queue_on_teleport(game:HttpGet(url)); ok = true
+        elseif syn and syn.queue_on_teleport then
+            syn.queue_on_teleport(game:HttpGet(url)); ok = true
+        elseif Krnl and Krnl.QueueOnTeleport then
+            Krnl.QueueOnTeleport(game:HttpGet(url)); ok = true
+        elseif request and request.queue_on_teleport then
+            request.queue_on_teleport(game:HttpGet(url)); ok = true
+        elseif _G and _G.QueueOnTeleport then
+            _G.QueueOnTeleport(game:HttpGet(url)); ok = true
+        end
+    end)
+    dbg("setupQueueOnTeleport result:", ok)
+    return ok
+end
+
+-- Global state
+local adminBL = loadBlacklist()
+local visitedState = loadVisited()
+local checkedCache = {}            -- cache for failed group-rank checks (store false only)
+local OWNER_USER_ID = nil
+local OWNER_GROUP_ID = nil
+
+-- Safe owner detection (no nil string)
+do
+    local ok, info = pcall(function() return MarketplaceService:GetProductInfo(game.PlaceId, Enum.InfoType.Asset) end)
+    if ok and type(info) == "table" and info.Creator and info.Creator.CreatorType then
+        if info.Creator.CreatorType == "User" and info.Creator.CreatorTargetId and tonumber(info.Creator.CreatorTargetId) then
+            OWNER_USER_ID = tostring(info.Creator.CreatorTargetId)
+            adminBL[OWNER_USER_ID] = true
+            dbg("Owner (user) added:", OWNER_USER_ID)
+        elseif info.Creator.CreatorType == "Group" and info.Creator.CreatorTargetId and tonumber(info.Creator.CreatorTargetId) then
+            OWNER_GROUP_ID = tonumber(info.Creator.CreatorTargetId)
+            dbg("Owner (group) detected:", OWNER_GROUP_ID)
+        end
+        saveBlacklist(adminBL)
+    end
+end
+
+-- Fetch servers (adaptive pages with HTTP call cap)
+local function fetchServers(placeId)
+    local servers = {}
+    local cursor = nil
+    local calls = 0
+    for page = 1, MAX_PAGES do
+        if calls >= MAX_HTTP_CALLS_PER_ACTION then
+            dbg("HTTP cap reached")
+            break
+        end
+        local url = "https://games.roblox.com/v1/games/" .. tostring(placeId) .. "/servers/Public?sortOrder=Asc&limit=100"
+        if cursor then url = url .. "&cursor=" .. cursor end
+        local ok, res = pcall(function() return game:HttpGet(url) end)
+        calls = calls + 1
+        if not ok or not res then
+            dbg("fetchServers http fail page", page)
+            break
+        end
+        local dec = safeDecode(res)
+        if not dec or not dec.data or #dec.data == 0 then break end
+        for _,v in ipairs(dec.data) do table.insert(servers, v) end
+        if dec.nextPageCursor and dec.nextPageCursor ~= "null" then
+            cursor = dec.nextPageCursor
+            task.wait(PAGE_DELAY)
+        else
+            break
+        end
+    end
+    return servers
+end
+
+-- Exhaustion check & mark visited
+local function allServersExhausted(servers, state)
+    local totalValid, visitedValid = 0, 0
+    local curJob = tostring(game.JobId or "")
+    for _,v in ipairs(servers) do
+        local sid = tostring(v.id)
+        if sid ~= curJob and tonumber(v.playing or 0) < tonumber(v.maxPlayers or 0) then
+            totalValid = totalValid + 1
+            if state.visited[sid] then visitedValid = visitedValid + 1 end
+        end
+    end
+    if totalValid == 0 then return false, totalValid, visitedValid end
+    return (visitedValid >= totalValid), totalValid, visitedValid
+end
+
+local function markVisited(state, sid)
+    state.visited[sid] = true
+    saveVisited(state)
+end
+
+-- Safe context checks
+local function isPrivateServer() return type(game.PrivateServerId) == "string" and game.PrivateServerId ~= "" end
+local function isSubplace() if not MAIN_PLACE_ID then return false end return game.PlaceId ~= MAIN_PLACE_ID end
+
+-- Clear caches on reset/hop
+local function clearCaches()
+    checkedCache = {}
+end
+
+-- Attempt hop (silent) with fallback kick
+local function attemptHop(mainUrl)
+    if isPrivateServer() then LocalPlayer:Kick("[SAFE EXIT] Private server"); return end
+    if isSubplace() then LocalPlayer:Kick("[SAFE EXIT] Sub-place"); return end
+
+    if mainUrl then pcall(setupQueueOnTeleport, mainUrl) end
+
+    local servers = fetchServers(game.PlaceId)
+    local exhausted, total, visited = allServersExhausted(servers, visitedState)
+    dbg("attemptHop: exhausted?", exhausted, "total", total, "visited", visited)
+
+    if exhausted then
+        visitedState = { hour = currentUTCHour(), visited = {} }
+        saveVisited(visitedState)
+        clearCaches()
+        -- try pick any non-current
+        for _,v in ipairs(servers) do
+            if tostring(v.id) ~= tostring(game.JobId) and tonumber(v.playing or 0) < tonumber(v.maxPlayers or 0) then
+                markVisited(visitedState, tostring(v.id))
+                pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, tostring(v.id), LocalPlayer) end)
+                return
+            end
+        end
+        pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
+        return
+    else
+        for _,v in ipairs(servers) do
+            local sid = tostring(v.id)
+            if sid ~= tostring(game.JobId) and tonumber(v.playing or 0) < tonumber(v.maxPlayers or 0) and not visitedState.visited[sid] then
+                markVisited(visitedState, sid)
+                clearCaches()
+                pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, sid, LocalPlayer) end)
+                return
+            end
+        end
+        pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
+        return
+    end
+end
+
+-- Detection helpers
+local function isPlayerAdminById(plr)
+    if not plr then return false end
+    return adminBL[tostring(plr.UserId)] == true
+end
+
+local function isPlayerAdminByGroupRank(plr)
+    if not plr or not OWNER_GROUP_ID then return false end
+    -- return cached false if exists
+    if checkedCache[plr.UserId] ~= nil then
+        return checkedCache[plr.UserId] -- either false or true (well only cache false below)
+    end
+    local ok, rank = pcall(function() return plr:GetRankInGroup(OWNER_GROUP_ID) end)
+    if ok and rank then
+        if rank >= MIN_ADMIN_RANK then
+            return true
+        else
+            -- cache false to avoid repeated network calls for same non-admin
+            checkedCache[plr.UserId] = false
+            return false
+        end
+    end
+    return false
+end
+
+-- On admin detected
+local function onAdminDetected(plr)
+    dbg("Admin detected:", plr.Name, plr.UserId)
+    attemptHop(MAIN_SCRIPT_URL)
+end
+
+-- Hour reset check
+do
+    local savedHour = visitedState.hour or currentUTCHour()
+    local nowHour = currentUTCHour()
+    if savedHour ~= nowHour then
+        visitedState = { hour = nowHour, visited = {} }
+        saveVisited(visitedState)
+        clearCaches()
+        dbg("Hour changed -> reset visited & cache")
+    end
+end
+
+-- initial scan
+for _,p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then
+        if isPlayerAdminById(p) or isPlayerAdminByGroupRank(p) then
+            onAdminDetected(p)
+            return
+        end
+    end
+end
+
+-- PlayerAdded reactive with retry
+Players.PlayerAdded:Connect(function(p)
+    if p == LocalPlayer then return end
+    -- immediate check
+    if isPlayerAdminById(p) or isPlayerAdminByGroupRank(p) then
+        onAdminDetected(p); return
+    end
+    -- retries for replication
+    for i = 1, REPL_RETRIES do
+        task.wait(REPL_WAIT)
+        if isPlayerAdminById(p) or isPlayerAdminByGroupRank(p) then
+            onAdminDetected(p); return
+        end
+    end
+end)
+
+-- API (executor control)
+getgenv().AdminDetector = getgenv().AdminDetector or {}
+do
+    local api = {}
+    api.List = function() return adminBL end
+    api.Set = function(id, state) adminBL[tostring(id)] = state and true or nil; saveBlacklist(adminBL); return true end
+    api.Remove = function(id) adminBL[tostring(id)] = nil; saveBlacklist(adminBL); return true end
+    api.ForceHop = function() attemptHop(MAIN_SCRIPT_URL) end
+    api.ToggleDebug = function(b) DEBUG = b; dbg("Debug ->", b) end
+    api.ResetVisited = function() visitedState = { hour = currentUTCHour(), visited = {} } saveVisited(visitedState); clearCaches(); return true end
+    api.ListVisited = function() return visitedState end
+    api.GetOwnerInfo = function() return { user = OWNER_USER_ID, group = OWNER_GROUP_ID } end
+    getgenv().AdminDetector = api
+end
+
+dbg("Patched AdminDetector ready")
